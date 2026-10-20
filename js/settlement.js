@@ -18,13 +18,15 @@
    * @param {string} currency - Currency symbol (e.g. '₹', '$')
    * @returns {Array} Sorted array of players with rank, net, and formatted strings
    */
-  function calculateLeaderboard(players, currency = '₹') {
+  function calculateLeaderboard(players, currency = '₹', miscountAdjustments = {}) {
     if (!Array.isArray(players) || players.length === 0) return [];
 
     const enriched = players.map(player => {
       const totalBuyIn = (player.buyIns || []).reduce((sum, b) => sum + (Number(b) || 0), 0);
       const cashOut = Number(player.cashOut) || 0;
-      const net = Math.round((cashOut - totalBuyIn) * 100) / 100;
+      const originalNet = Math.round((cashOut - totalBuyIn) * 100) / 100;
+      const adjustment = Math.round((Number(miscountAdjustments[player.id]) || 0) * 100) / 100;
+      const net = Math.round((originalNet + adjustment) * 100) / 100;
 
       let netFormatted = '';
       if (net > 0) {
@@ -40,6 +42,8 @@
         name: player.name || 'Unnamed Player',
         totalBuyIn,
         cashOut,
+        originalNet,
+        adjustment,
         net,
         netFormatted,
         isClockedOut: Boolean(player.clockedOut)
@@ -173,7 +177,7 @@
   /**
    * Format message in the exact style requested by the user.
    */
-  function generateSummaryText({ gameTitle, gameDate, leaderboard, transactions, gameUrl, currency = '₹' }) {
+  function generateSummaryText({ gameTitle, gameDate, leaderboard, transactions, gameUrl, currency = '₹', miscountInfo }) {
     const lines = [];
 
     // Header line: 🃏 Tuesday Night Poker · Tuesday, Oct 20 (or 🃏 Tuesday, Oct 20 · Afternoon Poker)
@@ -186,13 +190,32 @@
       lines.push(`🃏 ${headerTitle} · ${headerDate}`);
     }
 
+    // Miscount Reconciliation Line if applicable
+    if (miscountInfo && Math.abs(miscountInfo.diff) >= 0.01) {
+      lines.push('');
+      const sign = miscountInfo.diff > 0 ? '+' : '−';
+      const type = miscountInfo.diff > 0 ? 'Surplus' : 'Shortage';
+      lines.push(`⚖️ Miscount Reconciled: ${sign}${currency}${Math.abs(miscountInfo.diff).toLocaleString()} (${type})`);
+      if (miscountInfo.mode === 'equal') {
+        const perPlayer = Math.abs(miscountInfo.sharePerPlayer || (miscountInfo.diff / (leaderboard.length || 1)));
+        lines.push(`• Split equally across ${leaderboard.length} players (${sign}${currency}${perPlayer.toLocaleString()} each)`);
+      } else {
+        lines.push(`• Adjusted manually as agreed by players`);
+      }
+    }
+
     // Leaderboard lines:
-    // 🥇 Sam  +₹386
-    // 🥈 Vidit  +₹370
+    // 🥇 Sam  +₹386 (adj +₹25)
+    // 🥈 Vidit  +₹370 (adj +₹25)
     // 🥉 Anmol  ₹0
-    // 4. Megh  −₹68
+    // 4. Megh  −₹68 (adj +₹25)
     leaderboard.forEach(p => {
-      lines.push(`${p.rankIcon} ${p.name}  ${p.netFormatted}`);
+      let adjNote = '';
+      if (p.adjustment && Math.abs(p.adjustment) >= 0.01) {
+        const adjSign = p.adjustment > 0 ? '+' : '−';
+        adjNote = ` (adj ${adjSign}${currency}${Math.abs(p.adjustment).toLocaleString()})`;
+      }
+      lines.push(`${p.rankIcon} ${p.name}  ${p.netFormatted}${adjNote}`);
     });
 
     // Game URL if available

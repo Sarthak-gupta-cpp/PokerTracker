@@ -496,6 +496,46 @@
         <div id="endGamePlayersList">
           <!-- Populated dynamically -->
         </div>
+
+        <!-- Miscount Reconciliation Section (Visible when total counted != total buy-in) -->
+        <div id="miscountSection" class="miscount-box" style="display: none;">
+          <div class="miscount-header">
+            <div>
+              <div class="miscount-title" id="miscountTitle">⚖️ Miscount Reconciliation</div>
+              <div class="miscount-subtitle" id="miscountSubtitle">Pot does not match final chip count.</div>
+            </div>
+            <div class="miscount-badge" id="miscountBadge">−₹0</div>
+          </div>
+
+          <!-- Miscount Mode Selector -->
+          <div class="miscount-mode-toggle">
+            <button type="button" id="btnMiscountEqual" class="miscount-mode-btn active">
+              ⚖️ Split Equally (Default)
+            </button>
+            <button type="button" id="btnMiscountManual" class="miscount-mode-btn">
+              ✍️ Adjust Manually
+            </button>
+          </div>
+
+          <!-- Equal Split Info Preview -->
+          <div id="miscountEqualView" class="miscount-equal-view">
+            <p id="miscountEqualExplanation" style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.5rem;"></p>
+            <div id="miscountEqualChips" class="miscount-chips-grid"></div>
+          </div>
+
+          <!-- Manual Adjustments View -->
+          <div id="miscountManualView" class="miscount-manual-view" style="display: none;">
+            <div class="miscount-manual-status-bar">
+              <span id="miscountManualSummaryText" style="font-size: 0.8rem; font-weight: 600;">Allocated: ₹0 / ₹0</span>
+              <button type="button" id="btnAutoSplitRemaining" class="btn btn-secondary btn-sm" style="font-size: 0.72rem; padding: 0.2rem 0.55rem;">
+                ⚡ Auto-Split Remainder
+              </button>
+            </div>
+            <div id="miscountManualPlayersList" class="miscount-manual-list">
+              <!-- Dynamically populated rows with - / + steppers -->
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Stage 2: Final Settlement & Message Box -->

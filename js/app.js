@@ -59,6 +59,26 @@
   let syncManager = null;
   let activeModalPlayerId = null;
 
+  // Miscount reconciliation state (split equally vs manual shares)
+  let miscountState = {
+    mode: 'equal', // 'equal' | 'manual'
+    manualShares: {}, // { [playerId]: number }
+    diff: 0
+  };
+
+  function distributeEvenly(totalAmount, count) {
+    if (count <= 0) return [];
+    const base = Math.floor(totalAmount / count);
+    let remainder = Math.round(totalAmount - (base * count));
+    const result = [];
+    for (let i = 0; i < count; i++) {
+      const extra = remainder > 0 ? 1 : 0;
+      if (remainder > 0) remainder--;
+      result.push(base + extra);
+    }
+    return result;
+  }
+
   // Audio Context for chip & chime sounds
   let audioCtx = null;
 
@@ -230,6 +250,19 @@
     reconcileStatusText: document.getElementById('reconcileStatusText'),
     reconcileBox: document.getElementById('reconcileBox'),
     endGamePlayersList: document.getElementById('endGamePlayersList'),
+    miscountSection: document.getElementById('miscountSection'),
+    miscountTitle: document.getElementById('miscountTitle'),
+    miscountSubtitle: document.getElementById('miscountSubtitle'),
+    miscountBadge: document.getElementById('miscountBadge'),
+    btnMiscountEqual: document.getElementById('btnMiscountEqual'),
+    btnMiscountManual: document.getElementById('btnMiscountManual'),
+    miscountEqualView: document.getElementById('miscountEqualView'),
+    miscountEqualExplanation: document.getElementById('miscountEqualExplanation'),
+    miscountEqualChips: document.getElementById('miscountEqualChips'),
+    miscountManualView: document.getElementById('miscountManualView'),
+    miscountManualSummaryText: document.getElementById('miscountManualSummaryText'),
+    btnAutoSplitRemaining: document.getElementById('btnAutoSplitRemaining'),
+    miscountManualPlayersList: document.getElementById('miscountManualPlayersList'),
     btnCalculateSettlement: document.getElementById('btnCalculateSettlement'),
     btnEndGameBack: document.getElementById('btnEndGameBack'),
     btnDeleteGameFromModal: document.getElementById('btnDeleteGameFromModal'),
@@ -1240,6 +1273,9 @@
       return;
     }
 
+    miscountState.mode = 'equal';
+    miscountState.manualShares = {};
+
     dom.endGameStage1.style.display = 'block';
     dom.endGameStage2.style.display = 'none';
     dom.btnEndGameBack.style.display = 'none';
@@ -1318,6 +1354,7 @@
     totalPot = Math.round(totalPot * 100) / 100;
     totalCounted = Math.round(totalCounted * 100) / 100;
     const diff = Math.round((totalCounted - totalPot) * 100) / 100;
+    miscountState.diff = diff;
 
     if (Math.abs(diff) < 0.01) {
       dom.reconcileBox.classList.remove('has-error');
@@ -1332,6 +1369,113 @@
       dom.reconcileStatusText.className = 'reconcile-status status-error';
       dom.reconcileStatusText.textContent = `⚠️ −${state.currency}${Math.abs(diff).toLocaleString()} missing`;
     }
+
+    renderMiscountReconciliationUI(diff);
+  }
+
+  function renderMiscountReconciliationUI(diff) {
+    if (!dom.miscountSection) return;
+
+    if (Math.abs(diff) < 0.01) {
+      dom.miscountSection.style.display = 'none';
+      return;
+    }
+
+    dom.miscountSection.style.display = 'block';
+    const isSurplus = diff > 0;
+    const absDiff = Math.abs(diff);
+
+    if (isSurplus) {
+      dom.miscountSection.classList.add('is-surplus');
+      dom.miscountTitle.textContent = 'ℹ️ Pot Surplus Detected';
+      dom.miscountSubtitle.textContent = `Counted chips exceed recorded pot by ${state.currency}${absDiff.toLocaleString()}.`;
+      dom.miscountBadge.textContent = `+${state.currency}${absDiff.toLocaleString()}`;
+    } else {
+      dom.miscountSection.classList.remove('is-surplus');
+      dom.miscountTitle.textContent = '⚖️ Pot Shortage Detected';
+      dom.miscountSubtitle.textContent = `Counted chips are ${state.currency}${absDiff.toLocaleString()} short of recorded pot.`;
+      dom.miscountBadge.textContent = `−${state.currency}${absDiff.toLocaleString()}`;
+    }
+
+    if (miscountState.mode === 'equal') {
+      dom.btnMiscountEqual.classList.add('active');
+      dom.btnMiscountManual.classList.remove('active');
+      dom.miscountEqualView.style.display = 'block';
+      dom.miscountManualView.style.display = 'none';
+
+      const playerCount = state.players.length || 1;
+      const parts = distributeEvenly(Math.round(absDiff * 100), playerCount);
+      const sign = isSurplus ? '+' : '−';
+      dom.miscountEqualExplanation.textContent = `Splitting ${isSurplus ? 'surplus' : 'shortage'} of ${state.currency}${absDiff.toLocaleString()} equally across all ${playerCount} players:`;
+
+      dom.miscountEqualChips.innerHTML = '';
+      state.players.forEach((p, idx) => {
+        const shareAmt = parts[idx] / 100;
+        const chip = document.createElement('span');
+        chip.className = 'miscount-chip-pill';
+        chip.innerHTML = `<span>${escapeHtml(p.name)}:</span> <strong>${sign}${state.currency}${shareAmt.toLocaleString()}</strong>`;
+        dom.miscountEqualChips.appendChild(chip);
+      });
+    } else {
+      dom.btnMiscountEqual.classList.remove('active');
+      dom.btnMiscountManual.classList.add('active');
+      dom.miscountEqualView.style.display = 'none';
+      dom.miscountManualView.style.display = 'block';
+
+      state.players.forEach(p => {
+        if (typeof miscountState.manualShares[p.id] !== 'number') {
+          miscountState.manualShares[p.id] = 0;
+        }
+      });
+
+      renderMiscountManualList(absDiff, isSurplus);
+    }
+  }
+
+  function renderMiscountManualList(absDiff, isSurplus) {
+    let allocated = 0;
+    state.players.forEach(p => {
+      allocated += Number(miscountState.manualShares[p.id]) || 0;
+    });
+    allocated = Math.round(allocated * 100) / 100;
+    const remaining = Math.round((absDiff - allocated) * 100) / 100;
+
+    const statusBar = dom.miscountManualSummaryText.parentElement;
+    if (Math.abs(remaining) < 0.01) {
+      statusBar.className = 'miscount-manual-status-bar is-complete';
+      dom.miscountManualSummaryText.innerHTML = `✓ 100% Allocated (${state.currency}${allocated.toLocaleString()} distributed)`;
+      dom.btnAutoSplitRemaining.style.display = 'none';
+    } else if (remaining > 0) {
+      statusBar.className = 'miscount-manual-status-bar has-error';
+      dom.miscountManualSummaryText.innerHTML = `Allocated: ${state.currency}${allocated.toLocaleString()} / ${state.currency}${absDiff.toLocaleString()} &middot; <span style="color:var(--color-rose-light);">${state.currency}${remaining.toLocaleString()} remaining</span>`;
+      dom.btnAutoSplitRemaining.style.display = 'inline-flex';
+      dom.btnAutoSplitRemaining.textContent = `⚡ Distribute Remaining (${state.currency}${remaining.toLocaleString()})`;
+    } else {
+      statusBar.className = 'miscount-manual-status-bar has-error';
+      dom.miscountManualSummaryText.innerHTML = `Allocated: ${state.currency}${allocated.toLocaleString()} / ${state.currency}${absDiff.toLocaleString()} &middot; <span style="color:var(--color-rose-light);">${state.currency}${Math.abs(remaining).toLocaleString()} over-allocated</span>`;
+      dom.btnAutoSplitRemaining.style.display = 'none';
+    }
+
+    const step = (state.defaultBuyin && state.defaultBuyin >= 100) ? 10 : (state.defaultBuyin && state.defaultBuyin >= 20 ? 5 : 1);
+
+    dom.miscountManualPlayersList.innerHTML = '';
+    state.players.forEach(p => {
+      const currentShare = Number(miscountState.manualShares[p.id]) || 0;
+      const row = document.createElement('div');
+      row.className = 'miscount-manual-row';
+      row.innerHTML = `
+        <div class="miscount-manual-player-info">
+          <span class="miscount-manual-player-name">${escapeHtml(p.name)}</span>
+          <span class="miscount-manual-player-subtext">Share of miscount:</span>
+        </div>
+        <div class="miscount-stepper">
+          <button type="button" class="btn-stepper btn-miscount-dec" data-player-id="${p.id}" title="Decrease share by ${state.currency}${step}">−</button>
+          <input type="number" class="input-miscount-share" data-player-id="${p.id}" value="${currentShare}" min="0" step="any">
+          <button type="button" class="btn-stepper btn-miscount-inc" data-player-id="${p.id}" title="Increase share by ${state.currency}${step}">+</button>
+        </div>
+      `;
+      dom.miscountManualPlayersList.appendChild(row);
+    });
   }
 
   function calculateAndDisplaySettlement() {
@@ -1344,7 +1488,55 @@
       }
     });
 
-    const leaderboard = PokerSettlement.calculateLeaderboard(state.players, state.currency);
+    // Check balance and reconcile miscount if needed
+    const balance = PokerSettlement.validateBalance(state.players);
+    let miscountAdjustments = {};
+    let miscountInfo = null;
+
+    if (!balance.isBalanced) {
+      const absDiff = Math.abs(balance.diff);
+      const isMissing = balance.diff < 0;
+
+      if (miscountState.mode === 'manual') {
+        let sumShares = 0;
+        state.players.forEach(p => {
+          sumShares += (Number(miscountState.manualShares[p.id]) || 0);
+        });
+        const remaining = Math.round((absDiff - sumShares) * 100) / 100;
+        if (Math.abs(remaining) >= 0.01 && state.players.length > 0) {
+          const parts = distributeEvenly(Math.round(remaining * 100), state.players.length);
+          state.players.forEach((p, idx) => {
+            miscountState.manualShares[p.id] = Math.round(((Number(miscountState.manualShares[p.id]) || 0) + (parts[idx] / 100)) * 100) / 100;
+          });
+        }
+
+        state.players.forEach(p => {
+          const share = Number(miscountState.manualShares[p.id]) || 0;
+          miscountAdjustments[p.id] = isMissing ? share : -share;
+        });
+
+        miscountInfo = {
+          diff: balance.diff,
+          mode: 'manual',
+          shares: { ...miscountState.manualShares }
+        };
+      } else {
+        // Equal split mode (default)
+        const parts = distributeEvenly(Math.round(absDiff * 100), state.players.length);
+        state.players.forEach((p, idx) => {
+          const share = parts[idx] / 100;
+          miscountAdjustments[p.id] = isMissing ? share : -share;
+        });
+
+        miscountInfo = {
+          diff: balance.diff,
+          mode: 'equal',
+          sharePerPlayer: Math.round((absDiff / state.players.length) * 100) / 100
+        };
+      }
+    }
+
+    const leaderboard = PokerSettlement.calculateLeaderboard(state.players, state.currency, miscountAdjustments);
     const transactions = PokerSettlement.calculateSettlement(leaderboard);
     const gameUrl = syncManager ? syncManager.getSpectatorUrl() : window.location.href;
 
@@ -1354,7 +1546,8 @@
       leaderboard,
       transactions,
       gameUrl,
-      currency: state.currency
+      currency: state.currency,
+      miscountInfo
     });
 
     state.settlementSummary = summaryText;
@@ -1867,6 +2060,100 @@
       if (dom.btnDeleteGameFromModal) dom.btnDeleteGameFromModal.style.display = 'none';
       if (dom.btnContinueGameFromModal) dom.btnContinueGameFromModal.style.display = 'none';
     });
+
+    // Miscount Reconciliation Mode Toggles & Stepper Actions
+    if (dom.btnMiscountEqual) {
+      dom.btnMiscountEqual.addEventListener('click', () => {
+        miscountState.mode = 'equal';
+        renderMiscountReconciliationUI(miscountState.diff);
+      });
+    }
+
+    if (dom.btnMiscountManual) {
+      dom.btnMiscountManual.addEventListener('click', () => {
+        miscountState.mode = 'manual';
+        const absDiff = Math.abs(miscountState.diff);
+        let sumCurrent = 0;
+        state.players.forEach(p => { sumCurrent += (Number(miscountState.manualShares[p.id]) || 0); });
+        if (Math.abs(sumCurrent - absDiff) > 0.01 && state.players.length > 0) {
+          const parts = distributeEvenly(Math.round(absDiff * 100), state.players.length);
+          state.players.forEach((p, idx) => {
+            miscountState.manualShares[p.id] = parts[idx] / 100;
+          });
+        }
+        renderMiscountReconciliationUI(miscountState.diff);
+      });
+    }
+
+    if (dom.btnAutoSplitRemaining) {
+      dom.btnAutoSplitRemaining.addEventListener('click', () => {
+        const absDiff = Math.abs(miscountState.diff);
+        let allocated = 0;
+        state.players.forEach(p => { allocated += Number(miscountState.manualShares[p.id]) || 0; });
+        const remaining = Math.round((absDiff - allocated) * 100) / 100;
+        if (remaining > 0 && state.players.length > 0) {
+          const parts = distributeEvenly(Math.round(remaining * 100), state.players.length);
+          state.players.forEach((p, idx) => {
+            miscountState.manualShares[p.id] = Math.round(((Number(miscountState.manualShares[p.id]) || 0) + (parts[idx] / 100)) * 100) / 100;
+          });
+          renderMiscountManualList(absDiff, miscountState.diff > 0);
+        }
+      });
+    }
+
+    if (dom.miscountManualPlayersList) {
+      dom.miscountManualPlayersList.addEventListener('click', (e) => {
+        const incBtn = e.target.closest('.btn-miscount-inc');
+        const decBtn = e.target.closest('.btn-miscount-dec');
+        const step = (state.defaultBuyin && state.defaultBuyin >= 100) ? 10 : (state.defaultBuyin && state.defaultBuyin >= 20 ? 5 : 1);
+        const absDiff = Math.abs(miscountState.diff);
+
+        if (incBtn) {
+          const pId = incBtn.dataset.playerId;
+          const curr = Number(miscountState.manualShares[pId]) || 0;
+          miscountState.manualShares[pId] = Math.round((curr + step) * 100) / 100;
+          renderMiscountManualList(absDiff, miscountState.diff > 0);
+          return;
+        }
+
+        if (decBtn) {
+          const pId = decBtn.dataset.playerId;
+          const curr = Number(miscountState.manualShares[pId]) || 0;
+          miscountState.manualShares[pId] = Math.max(0, Math.round((curr - step) * 100) / 100);
+          renderMiscountManualList(absDiff, miscountState.diff > 0);
+          return;
+        }
+      });
+
+      dom.miscountManualPlayersList.addEventListener('input', (e) => {
+        const inp = e.target.closest('.input-miscount-share');
+        if (inp) {
+          const pId = inp.dataset.playerId;
+          const val = Math.max(0, Number(inp.value) || 0);
+          miscountState.manualShares[pId] = val;
+          const absDiff = Math.abs(miscountState.diff);
+          let allocated = 0;
+          state.players.forEach(p => { allocated += Number(miscountState.manualShares[p.id]) || 0; });
+          allocated = Math.round(allocated * 100) / 100;
+          const remaining = Math.round((absDiff - allocated) * 100) / 100;
+          const statusBar = dom.miscountManualSummaryText.parentElement;
+          if (Math.abs(remaining) < 0.01) {
+            statusBar.className = 'miscount-manual-status-bar is-complete';
+            dom.miscountManualSummaryText.innerHTML = `✓ 100% Allocated (${state.currency}${allocated.toLocaleString()} distributed)`;
+            dom.btnAutoSplitRemaining.style.display = 'none';
+          } else if (remaining > 0) {
+            statusBar.className = 'miscount-manual-status-bar has-error';
+            dom.miscountManualSummaryText.innerHTML = `Allocated: ${state.currency}${allocated.toLocaleString()} / ${state.currency}${absDiff.toLocaleString()} &middot; <span style="color:var(--color-rose-light);">${state.currency}${remaining.toLocaleString()} remaining</span>`;
+            dom.btnAutoSplitRemaining.style.display = 'inline-flex';
+            dom.btnAutoSplitRemaining.textContent = `⚡ Distribute Remaining (${state.currency}${remaining.toLocaleString()})`;
+          } else {
+            statusBar.className = 'miscount-manual-status-bar has-error';
+            dom.miscountManualSummaryText.innerHTML = `Allocated: ${state.currency}${allocated.toLocaleString()} / ${state.currency}${absDiff.toLocaleString()} &middot; <span style="color:var(--color-rose-light);">${state.currency}${Math.abs(remaining).toLocaleString()} over-allocated</span>`;
+            dom.btnAutoSplitRemaining.style.display = 'none';
+          }
+        }
+      });
+    }
 
     // Post Game Buttons
     if (dom.btnDeleteGameFromModal) dom.btnDeleteGameFromModal.addEventListener('click', () => deleteGameSession(false));
