@@ -17,15 +17,30 @@
   // Current Active View
   let currentView = 'home'; // 'home' | 'game'
 
+  // Get time of day based on hour: morning (4-12), afternoon (12-4), evening (4-8), night (8-4)
+  function getTimeOfDay(date = new Date()) {
+    const hour = date.getHours();
+    if (hour >= 4 && hour < 12) return 'Morning';
+    if (hour >= 12 && hour < 16) return 'Afternoon';
+    if (hour >= 16 && hour < 20) return 'Evening'; // 4 PM to 8 PM (16:00 - 19:59)
+    return 'Night'; // 8 PM to 4 AM
+  }
+
+  function getDefaultGameTitle(date = new Date()) {
+    const timeOfDay = getTimeOfDay(date);
+    const dateStr = date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+    return `${dateStr} · ${timeOfDay} Poker`;
+  }
+
   // Application State
   let state = {
     roomId: null,
     hostSecret: null,
     isHost: true,
-    title: 'Tuesday Night Poker',
+    title: getDefaultGameTitle(),
     date: '',
     currency: '₹',
-    defaultBuyin: 200,
+    defaultBuyin: 100,
     soundEnabled: true,
     players: [],
     status: 'active', // 'active' | 'ended'
@@ -250,10 +265,10 @@
     const roomParam = urlParams.get('room');
     const claimParam = urlParams.get('claim');
 
-    // Default formatted date (e.g. "Tuesday, Oct 20")
+    // Default formatted date and title (e.g. "Tuesday, Oct 20 · Afternoon Poker")
     const now = new Date();
     state.date = now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
-    const defaultTitle = `${now.toLocaleDateString('en-US', { weekday: 'long' })} Night Poker`;
+    const defaultTitle = getDefaultGameTitle(now);
 
     let savedGame = null;
     try {
@@ -303,8 +318,8 @@
     }
 
     // Populate Home Form Defaults
-    dom.newGameTitleInput.value = state.title || defaultTitle;
-    dom.newGameDefaultBuyin.value = state.defaultBuyin || 200;
+    dom.newGameTitleInput.value = defaultTitle;
+    dom.newGameDefaultBuyin.value = state.defaultBuyin || 100;
     dom.newGameCurrencyTag.textContent = state.currency || '₹';
 
     render();
@@ -318,6 +333,7 @@
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY_SETTINGS) || '{}');
       if (saved.currency) state.currency = saved.currency;
       if (saved.defaultBuyin) state.defaultBuyin = Number(saved.defaultBuyin);
+      else state.defaultBuyin = 100;
       if (typeof saved.soundEnabled === 'boolean') state.soundEnabled = saved.soundEnabled;
     } catch (e) {}
   }
@@ -434,8 +450,8 @@
   // Game Setup & Initialization
   // =========================================================================
   function createAndLaunchGame() {
-    const title = dom.newGameTitleInput.value.trim() || 'Poker Night';
-    const defaultBuyin = Number(dom.newGameDefaultBuyin.value) || 200;
+    const title = dom.newGameTitleInput.value.trim() || getDefaultGameTitle(new Date());
+    const defaultBuyin = Number(dom.newGameDefaultBuyin.value) || 100;
 
     if (selectedTonightPlayers.length === 0) {
       showToast('Please add at least 1 player to start the game!', 'warning');
@@ -1365,6 +1381,8 @@
 
     // Header New Game button
     dom.btnHeaderNewGame.addEventListener('click', () => {
+      dom.newGameTitleInput.value = getDefaultGameTitle(new Date());
+      dom.newGameDefaultBuyin.value = state.defaultBuyin || 100;
       switchView('home');
       dom.newGameTitleInput.focus();
     });
@@ -1572,7 +1590,7 @@
 
     dom.btnSaveSettings.addEventListener('click', () => {
       state.currency = dom.settingCurrencyInput.value.trim() || '₹';
-      state.defaultBuyin = Number(dom.settingDefaultBuyinInput.value) || 200;
+      state.defaultBuyin = Number(dom.settingDefaultBuyinInput.value) || 100;
       state.soundEnabled = dom.settingSoundToggle.checked;
 
       try {

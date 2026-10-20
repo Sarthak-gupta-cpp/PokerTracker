@@ -10,7 +10,7 @@
 
 - **♠️ Clean & Minimalist Aesthetics**: Dark obsidian slate UI with emerald accents, high-contrast typography, and smooth micro-animations.
 - **💰 Live Money in the Game**: Real-time counter of total pot/buy-ins, active players, and average stack.
-- **⚡ 1-Tap Rebuys & Custom Buy-ins**: Configurable default buy-in (e.g. ₹200) for instant 1-tap rebuys, plus custom amount input with quick presets (+100, +200, +500, +1000).
+- **⚡ 1-Tap Rebuys & Custom Buy-ins**: Configurable default buy-in (default ₹100) for instant 1-tap rebuys, plus custom amount input with quick presets (+100, +200, +500, +1000).
 - **⏱️ Mid-Game Clock Out**: Any player leaving early can clock out with their final chip count; the app tracks their net profit/loss and locks their count while keeping the pot reconciled.
 - **🏁 End Game Settlement & Debt Simplification**:
   - Prompts for chip counts of all remaining active players.
@@ -92,7 +92,7 @@ PokerTracker/
 
 1. **Start Game**: Open the web app on your phone, tablet, or laptop.
 2. **Add Players**: Type player names in the input bar or click recent player suggestions. Each player starts with 1 default buy-in.
-3. **Rebuys**: Tap `+₹200` on any player card for a quick rebuy, or `+Custom` for an irregular amount.
+3. **Rebuys**: Tap `+₹100` on any player card for a quick rebuy, or `+Custom` for an irregular amount.
 4. **Share with Table**: Click **Share Live** to display the QR code or copy the spectator link for players to watch live.
 5. **Clock Out Early**: If someone leaves early, tap **Clock Out** on their card and enter their ending chips.
 6. **Pass Host** *(Optional)*: If the host needs to leave or pass tracking duties, click **Transfer Host** and send the link to the new host.

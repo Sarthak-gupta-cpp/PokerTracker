@@ -176,10 +176,15 @@
   function generateSummaryText({ gameTitle, gameDate, leaderboard, transactions, gameUrl, currency = '₹' }) {
     const lines = [];
 
-    // Header line: 🃏 Tuesday Night Poker · Tuesday, Oct 20
+    // Header line: 🃏 Tuesday Night Poker · Tuesday, Oct 20 (or 🃏 Tuesday, Oct 20 · Afternoon Poker)
     const headerTitle = gameTitle || 'Poker Night';
     const headerDate = gameDate || new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
-    lines.push(`🃏 ${headerTitle} · ${headerDate}`);
+    if (headerTitle.toLowerCase().includes(headerDate.toLowerCase()) ||
+        (gameDate && headerTitle.toLowerCase().includes(gameDate.toLowerCase()))) {
+      lines.push(`🃏 ${headerTitle}`);
+    } else {
+      lines.push(`🃏 ${headerTitle} · ${headerDate}`);
+    }
 
     // Leaderboard lines:
     // 🥇 Sam  +₹386
