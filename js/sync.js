@@ -35,6 +35,9 @@
       this.connections = new Map(); // For host: Map of peerId -> DataConnection
       this.hostConn = null; // For viewer: DataConnection to host
       this.isConnected = false;
+      this.isHandingOver = false;
+      this.handoverWatcherTimeout = null;
+      this.targetNewHostName = null;
       this.pingTimer = null;
       this.reconnectTimer = null;
       this.latestState = null;
@@ -102,6 +105,7 @@
 
         this.peer.on('open', (id) => {
           this.isConnected = true;
+          this.isHandingOver = false;
           this.hostRetryCount = 0;
           this.onConnectionChange({
             status: 'online',
@@ -109,6 +113,12 @@
             message: 'Live hosting active',
             peerId: id
           });
+
+          // Immediately broadcast current state so connecting spectators and watchers get it
+          const currentState = this.getState();
+          if (currentState) {
+            this.broadcastState(currentState);
+          }
         });
 
         this.peer.on('connection', (conn) => {
@@ -119,30 +129,33 @@
           console.error('Host Peer error:', err);
           if (err.type === 'unavailable-id') {
             if (this.hostRetryCount === undefined) this.hostRetryCount = 0;
-            if (this.hostRetryCount < 6) {
+            if (this.hostRetryCount < 8) {
               this.hostRetryCount++;
               this.onConnectionChange({
                 status: 'connecting',
                 role: 'host',
-                message: `Claiming host slot (attempt ${this.hostRetryCount}/6)...`
+                message: `Claiming host slot (attempt ${this.hostRetryCount}/8)...`
               });
               setTimeout(() => {
                 if (this.isHost) {
                   this.cleanup();
-                  if (this.peer && !this.peer.destroyed) {
-                    try { this.peer.destroy(); } catch (e) {}
-                    this.peer = null;
-                  }
                   this._startHost();
                 }
-              }, 1200);
+              }, 800);
               return;
             }
             this.onConnectionChange({
               status: 'warning',
               role: 'host',
-              message: 'Host ID already in use. If running in another tab, close it.'
+              message: 'Host ID is releasing. Please wait a moment...'
             });
+            setTimeout(() => {
+              if (this.isHost) {
+                this.hostRetryCount = 0;
+                this.cleanup();
+                this._startHost();
+              }
+            }, 2000);
           } else {
             this.onConnectionChange({
               status: 'error',
@@ -197,16 +210,27 @@
         } else if (data.type === 'CLAIM_HOST') {
           // Check secret for host transfer
           if (data.secret && data.secret === this.hostSecret) {
+            this.pendingTransferClaimant = {
+              peer: conn.peer,
+              newHostName: data.newHostName || 'New Host'
+            };
             try {
-              conn.send({ type: 'HOST_TRANSFER_CONFIRMED', success: true });
+              // Send current state and transfer ready packet to claimant
+              conn.send({
+                type: 'HOST_TRANSFER_READY',
+                secret: this.hostSecret,
+                state: this.getState()
+              });
             } catch (e) {}
-            // Wait for confirmation packet to flush out of network buffer before destroying host peer
-            setTimeout(() => {
-              this.stepDownAsHost(data.newHostName || 'New Host');
-            }, 400);
           } else {
             conn.send({ type: 'HOST_TRANSFER_DENIED', error: 'Invalid secret key' });
           }
+        } else if (data.type === 'HOST_TAKEOVER_ACK') {
+          // New host confirmed takeover with complete state!
+          // Initiate handover: keep watching until new host is verified live
+          const claimant = this.pendingTransferClaimant;
+          this.pendingTransferClaimant = null;
+          this.startHostHandover(claimant ? claimant.newHostName : 'New Host', conn.peer);
         }
       });
 
@@ -253,14 +277,22 @@
             const sec = this.pendingClaimSecret;
             this.pendingClaimSecret = null;
             this.pendingHostSecret = sec;
-            this._handlePromotedToHost();
+            this._handlePromotedToHost(sec, this.getState());
             return;
           }
-          this.onConnectionChange({
-            status: 'warning',
-            role: 'viewer',
-            message: 'Waiting for host to come online...'
-          });
+          if (this.isHandingOver) {
+            this.onConnectionChange({
+              status: 'connecting',
+              role: 'host',
+              message: `Waiting for ${this.targetNewHostName || 'new host'} to complete takeover...`
+            });
+          } else {
+            this.onConnectionChange({
+              status: 'warning',
+              role: 'viewer',
+              message: 'Waiting for host to come online...'
+            });
+          }
           this._scheduleViewerReconnect(targetHostId);
         });
 
@@ -302,6 +334,18 @@
         if (!data || typeof data !== 'object') return;
 
         if (data.type === 'FULL_STATE' || data.type === 'STATE_UPDATE') {
+          // If this peer was handing over host, and the new host is now confirmed transmitting:
+          if (this.isHandingOver) {
+            this.isHandingOver = false;
+            this.isHost = false;
+            this.hostSecret = null;
+            if (this.handoverWatcherTimeout) {
+              clearTimeout(this.handoverWatcherTimeout);
+              this.handoverWatcherTimeout = null;
+            }
+            this.onHostTransferred(this.targetNewHostName || 'New Host');
+          }
+
           this.latestState = data.payload;
           this.onStateReceived(data.payload);
 
@@ -311,15 +355,31 @@
             this.pendingClaimSecret = null;
             this.claimHost(secret);
           }
-        } else if (data.type === 'HOST_TRANSFER_CONFIRMED') {
-          this._handlePromotedToHost();
+        } else if (data.type === 'HOST_TRANSFER_READY' || data.type === 'HOST_TRANSFER_CONFIRMED') {
+          const secret = data.secret || this.pendingHostSecret || this.hostSecret;
+          const remoteState = data.state || this.latestState;
+          if (remoteState) {
+            this.latestState = remoteState;
+            this.onStateReceived(remoteState);
+          }
+
+          // Acknowledge back to old host that we have taken over!
+          try {
+            conn.send({ type: 'HOST_TAKEOVER_ACK' });
+          } catch (e) {}
+
+          // Promote to host!
+          this._handlePromotedToHost(secret, remoteState);
         } else if (data.type === 'HOST_TRANSFER_DENIED') {
           if (this._pendingClaimReject) {
             this._pendingClaimReject(new Error(data.error || 'Invalid host transfer key'));
             this._pendingClaimReject = null;
           }
         } else if (data.type === 'HOST_TRANSFERRED') {
-          this.onHostTransferred(data.newHostName || 'Another player');
+          // Only process demotion if we are not the host taking over or handing over
+          if (!this.isHost && !this.pendingHostSecret && !this.isHandingOver) {
+            this.onHostTransferred(data.newHostName || 'Another player');
+          }
         }
       });
 
@@ -379,34 +439,72 @@
     }
 
     /**
-     * Step down as host when rights are transferred
+     * Start host handover without demoting until new host is confirmed online
      */
-    stepDownAsHost(newHostName) {
-      this.isHost = false;
-      this.hostSecret = null;
+    startHostHandover(newHostName, claimantPeerId = null) {
+      this.isHandingOver = true;
+      this.targetNewHostName = newHostName;
 
-      // Broadcast transfer notice to remaining viewers
+      // Broadcast transfer notice to remaining viewers, excluding the new host
       for (const [peerId, conn] of this.connections.entries()) {
-        if (conn && conn.open) {
+        if (peerId !== claimantPeerId && conn && conn.open) {
           try {
             conn.send({ type: 'HOST_TRANSFERRED', newHostName });
           } catch (e) {}
         }
       }
 
-      this.cleanup();
+      // Close host socket so new host can bind to the room host ID
+      if (this.pingTimer) {
+        clearInterval(this.pingTimer);
+        this.pingTimer = null;
+      }
+      for (const conn of this.connections.values()) {
+        try { conn.close(); } catch (e) {}
+      }
+      this.connections.clear();
+
       if (this.peer && !this.peer.destroyed) {
         try { this.peer.destroy(); } catch (e) {}
         this.peer = null;
       }
-      this.connections.clear();
+      this.isConnected = false;
 
-      this.onHostTransferred(newHostName);
+      this.onConnectionChange({
+        status: 'connecting',
+        role: 'host',
+        message: `Transferring host to ${newHostName}...`
+      });
 
-      // Restart as viewer after host peer ID is freed
+      // Watch for the new host to come online
+      if (this.handoverWatcherTimeout) clearTimeout(this.handoverWatcherTimeout);
+
+      // Safety recovery: If new host fails to come online within 14s, reclaim hosting!
+      this.handoverWatcherTimeout = setTimeout(() => {
+        if (this.isHandingOver) {
+          console.warn('Host handover timed out. New host failed to bind. Reclaiming host authority.');
+          this.isHandingOver = false;
+          this.isHost = true;
+          this.cleanup();
+          this._startHost();
+          this.onConnectionChange({
+            status: 'warning',
+            role: 'host',
+            message: 'Handover timed out. Host authority restored.'
+          });
+        }
+      }, 14000);
+
+      // Start watcher as viewer to test when new host is live
       setTimeout(() => {
-        this._startViewer();
+        if (this.isHandingOver) {
+          this._startViewer();
+        }
       }, 1200);
+    }
+
+    stepDownAsHost(newHostName, excludePeerId = null) {
+      this.startHostHandover(newHostName, excludePeerId);
     }
 
     /**
@@ -435,9 +533,11 @@
       });
     }
 
-    _handlePromotedToHost() {
+    _handlePromotedToHost(secret, latestState) {
       this.isHost = true;
-      this.hostSecret = this.pendingHostSecret || this.hostSecret;
+      this.isHandingOver = false;
+      this.hostSecret = secret || this.pendingHostSecret || this.hostSecret;
+      this.pendingClaimSecret = null;
       this.pendingHostSecret = null;
 
       if (this._pendingClaimResolve) {
@@ -445,7 +545,7 @@
         this._pendingClaimResolve = null;
       }
 
-      this.onHostPromoted(this.hostSecret, this.latestState);
+      this.onHostPromoted(this.hostSecret, latestState || this.latestState);
 
       // Clean up viewer peer
       this.cleanup();
@@ -455,12 +555,17 @@
       }
 
       // Claim host peer ID
+      this.hostRetryCount = 0;
       setTimeout(() => {
         this._startHost();
-      }, 800);
+      }, 700);
     }
 
     cleanup() {
+      if (this.handoverWatcherTimeout) {
+        clearTimeout(this.handoverWatcherTimeout);
+        this.handoverWatcherTimeout = null;
+      }
       if (this.pingTimer) {
         clearInterval(this.pingTimer);
         this.pingTimer = null;

@@ -297,7 +297,18 @@
       state.roomId = roomParam.toUpperCase();
       const storedSecret = localStorage.getItem(`pokertracker_secret_${state.roomId}`);
 
-      if (claimParam) {
+      if (storedSecret && (!claimParam || storedSecret === claimParam)) {
+        // User already holds this room's secret -> maintain Host authority
+        state.hostSecret = storedSecret;
+        state.isHost = true;
+        state.pendingClaimSecret = null;
+        if (claimParam) {
+          try {
+            const cleanUrl = `${window.location.origin}${window.location.pathname}?room=${state.roomId}#game`;
+            history.replaceState(null, '', cleanUrl);
+          } catch (e) {}
+        }
+      } else if (claimParam) {
         state.pendingClaimSecret = claimParam;
         state.isHost = false;
         state.hostSecret = null;
@@ -688,23 +699,33 @@
         }
       },
       onHostTransferred: (newHostName) => {
-        showToast(`👑 Host transferred to ${newHostName}. You are now Spectating.`, 'warning');
-        state.isHost = false;
-        state.hostSecret = null;
-        localStorage.removeItem(`pokertracker_secret_${state.roomId}`);
-        saveState();
-        render();
+        if (state.isHost) {
+          state.isHost = false;
+          state.hostSecret = null;
+          localStorage.removeItem(`pokertracker_secret_${state.roomId}`);
+          saveState();
+          render();
+          showToast(`👑 Host transferred to ${newHostName}. You are now Spectating.`, 'warning');
+        }
       },
       onHostPromoted: (newSecret, latestState) => {
-        showToast('👑 You claimed Host authority for this game!', 'success');
         state.isHost = true;
         state.hostSecret = newSecret;
+        state.pendingClaimSecret = null;
         if (latestState) {
           state = { ...state, ...latestState, isHost: true };
         }
         localStorage.setItem(`pokertracker_secret_${state.roomId}`, newSecret);
         saveState();
         render();
+
+        // Strip claim parameter from URL so browser reloads stay safely on Host view
+        try {
+          const cleanUrl = `${window.location.origin}${window.location.pathname}?room=${state.roomId}#game`;
+          history.replaceState(null, '', cleanUrl);
+        } catch (e) {}
+
+        showToast('👑 You claimed Host authority for this game!', 'success');
       },
       onConnectionChange: ({ status, message }) => {
         updateSyncStatusUI(status, message);
