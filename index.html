@@ -120,28 +120,20 @@
         </p>
       </section>
 
-      <!-- Active Game Banner (If one exists) -->
-      <section id="homeActiveGameBanner" class="active-game-card" style="display: none;">
-        <div class="active-game-card-header">
-          <div style="display: flex; align-items: center; gap: 0.5rem;">
-            <span class="status-dot"></span>
-            <span class="active-game-label">ACTIVE GAME IN PROGRESS</span>
-          </div>
-          <span id="homeActiveRoomTag" class="room-code-tag"></span>
-        </div>
-        <div class="active-game-card-body">
+      <!-- Your Games Section -->
+      <section class="home-section-card" id="gamesSection">
+        <div class="section-card-header">
+          <div class="section-card-icon">🎰</div>
           <div>
-            <h3 id="homeActiveGameTitle" class="active-game-title">Tuesday Night Poker</h3>
-            <div id="homeActiveGameMeta" class="active-game-meta">0 players · Pot: ₹0</div>
+            <h2 class="section-card-title">Your Games</h2>
+            <p class="section-card-subtitle">Active and recent poker sessions on this device.</p>
           </div>
-          <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
-            <button id="btnResumeActiveGame" class="btn btn-primary btn-lg">
-              <span>▶ Resume Game</span>
-            </button>
-            <button id="btnDeleteActiveGameHome" class="btn btn-ghost btn-sm" style="color: var(--color-rose-light);" title="Delete this game">
-              <span>🗑️ Delete</span>
-            </button>
-          </div>
+        </div>
+        <div id="gamesListContainer" class="games-list">
+          <!-- Populated dynamically -->
+        </div>
+        <div id="noGamesMsg" class="empty-roster-state">
+          <p>No games yet. Create one below!</p>
         </div>
       </section>
 
@@ -160,7 +152,7 @@
           <div class="new-game-settings-grid">
             <div class="form-field">
               <label for="newGameTitleInput" class="form-label">Game Title</label>
-              <input type="text" id="newGameTitleInput" class="input-text" placeholder="e.g. Tuesday Night Poker" required>
+              <input type="text" id="newGameTitleInput" class="input-text" placeholder="Game title (auto-generated)..." required>
             </div>
             <div class="form-field">
               <label for="newGameDefaultBuyin" class="form-label">Default Buy-in</label>
@@ -261,6 +253,7 @@
   <!-- ========================================================================= -->
   <!-- VIEW 2: ACTIVE GAME DASHBOARD -->
   <!-- ========================================================================= -->
+  <div id="viewGame" class="app-view" style="display: none;">
     <main class="container">
 
       <!-- Game Settled Alert Banner (Visible when game has been settled) -->
@@ -283,7 +276,7 @@
       <section class="game-hero">
         <div class="game-title-row">
           <div class="game-title-input-wrap">
-            <input type="text" id="gameTitleInput" class="game-title-input" value="Tuesday Night Poker" placeholder="Game title..." aria-label="Game Title">
+            <input type="text" id="gameTitleInput" class="game-title-input" placeholder="Game title..." aria-label="Game Title">
           </div>
           <div class="game-date-badge" id="gameDateBadge">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -292,7 +285,7 @@
               <line x1="8" y1="2" x2="8" y2="6"></line>
               <line x1="3" y1="10" x2="21" y2="10"></line>
             </svg>
-            <span id="gameDateText">Tuesday, Oct 20</span>
+            <span id="gameDateText"></span>
           </div>
         </div>
 

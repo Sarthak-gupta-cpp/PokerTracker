@@ -7,6 +7,7 @@
   'use strict';
 
   // Storage Keys
+  const STORAGE_KEY_GAMES = 'pokertracker_games_list_v1';
   const STORAGE_KEY_GAME = 'pokertracker_game_state_v1';
   const STORAGE_KEY_USUAL = 'pokertracker_usual_players_v1';
   const STORAGE_KEY_SETTINGS = 'pokertracker_user_settings';
@@ -144,12 +145,9 @@
     btnSettings: document.getElementById('btnSettings'),
 
     // Home View Elements
-    homeActiveGameBanner: document.getElementById('homeActiveGameBanner'),
-    homeActiveRoomTag: document.getElementById('homeActiveRoomTag'),
-    homeActiveGameTitle: document.getElementById('homeActiveGameTitle'),
-    homeActiveGameMeta: document.getElementById('homeActiveGameMeta'),
-    btnResumeActiveGame: document.getElementById('btnResumeActiveGame'),
-    btnDeleteActiveGameHome: document.getElementById('btnDeleteActiveGameHome'),
+    gamesSection: document.getElementById('gamesSection'),
+    gamesListContainer: document.getElementById('gamesListContainer'),
+    noGamesMsg: document.getElementById('noGamesMsg'),
 
     // New Game Form
     newGameForm: document.getElementById('newGameForm'),
@@ -340,6 +338,7 @@
     render();
     renderUsualRoster();
     renderUsualPickerGrid();
+    renderGamesList();
     bindEvents();
   }
 
@@ -403,6 +402,185 @@
   }
 
   // =========================================================================
+  // Multi-Game Session Storage & Management
+  // =========================================================================
+  function getAllStoredGames() {
+    let games = [];
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_GAMES);
+      if (raw) {
+        games = JSON.parse(raw);
+      }
+    } catch (e) {}
+
+    // Backward compatibility: import legacy single game if not already in list
+    try {
+      const legacy = JSON.parse(localStorage.getItem(STORAGE_KEY_GAME) || 'null');
+      if (legacy && legacy.roomId && !games.some(g => g.roomId === legacy.roomId)) {
+        games.unshift(legacy);
+        localStorage.setItem(STORAGE_KEY_GAMES, JSON.stringify(games));
+      }
+    } catch (e) {}
+
+    return Array.isArray(games) ? games : [];
+  }
+
+  function saveGameToCollection(gameState) {
+    if (!gameState || !gameState.roomId) return;
+    const games = getAllStoredGames();
+    const idx = games.findIndex(g => g.roomId === gameState.roomId);
+    const snapshot = {
+      roomId: gameState.roomId,
+      title: gameState.title,
+      date: gameState.date,
+      status: gameState.status || 'active',
+      currency: gameState.currency || '₹',
+      defaultBuyin: gameState.defaultBuyin || 100,
+      players: gameState.players || [],
+      settlementSummary: gameState.settlementSummary || '',
+      hostSecret: gameState.hostSecret || null,
+      isHost: gameState.isHost,
+      lastUpdated: Date.now()
+    };
+
+    if (idx >= 0) {
+      games[idx] = { ...games[idx], ...snapshot };
+    } else {
+      games.unshift(snapshot);
+    }
+
+    try {
+      localStorage.setItem(STORAGE_KEY_GAMES, JSON.stringify(games));
+    } catch (e) {}
+  }
+
+  function removeGameFromCollection(roomId) {
+    if (!roomId) return;
+    let games = getAllStoredGames();
+    games = games.filter(g => g.roomId !== roomId);
+    try {
+      localStorage.setItem(STORAGE_KEY_GAMES, JSON.stringify(games));
+    } catch (e) {}
+    localStorage.removeItem(`pokertracker_secret_${roomId}`);
+  }
+
+  function renderGamesList() {
+    if (!dom.gamesListContainer) return;
+    const games = getAllStoredGames();
+    dom.gamesListContainer.innerHTML = '';
+
+    if (games.length === 0) {
+      if (dom.noGamesMsg) dom.noGamesMsg.style.display = 'block';
+      return;
+    }
+
+    if (dom.noGamesMsg) dom.noGamesMsg.style.display = 'none';
+
+    games.forEach(g => {
+      const card = document.createElement('div');
+      card.className = `game-session-card ${g.status === 'ended' ? 'is-settled' : 'is-active'}`;
+
+      let pot = 0;
+      if (Array.isArray(g.players)) {
+        g.players.forEach(p => {
+          pot += (p.buyIns || []).reduce((s, b) => s + (Number(b) || 0), 0);
+        });
+      }
+
+      const isCurrentActive = state.roomId === g.roomId && currentView === 'game';
+      const statusBadgeHtml = g.status === 'ended'
+        ? `<span class="game-status-badge settled">🏁 Settled</span>`
+        : `<span class="game-status-badge active"><span class="status-dot"></span> Live</span>`;
+
+      card.innerHTML = `
+        <div class="game-session-info">
+          <div class="game-session-title-row">
+            <span class="game-session-title">${escapeHtml(g.title || 'Poker Game')}</span>
+            ${statusBadgeHtml}
+            <span class="game-session-room">#${g.roomId}</span>
+          </div>
+          <div class="game-session-meta">
+            <span>📅 ${escapeHtml(g.date || 'Recent')}</span>
+            <span>👥 ${(g.players || []).length} players</span>
+            <span>💰 Pot: ${escapeHtml(g.currency || '₹')}${pot.toLocaleString()}</span>
+          </div>
+        </div>
+        <div class="game-session-actions">
+          <button type="button" class="btn btn-primary btn-sm btn-open-session">
+            ${isCurrentActive ? '▶ Resume' : 'Open ➔'}
+          </button>
+          <button type="button" class="btn btn-danger-ghost btn-sm btn-delete-session" title="Delete this game">
+            🗑️
+          </button>
+        </div>
+      `;
+
+      card.querySelector('.btn-open-session').addEventListener('click', () => {
+        openGameSession(g.roomId);
+      });
+
+      card.querySelector('.btn-delete-session').addEventListener('click', (e) => {
+        e.stopPropagation();
+        deleteSingleGameSession(g.roomId, g.title);
+      });
+
+      dom.gamesListContainer.appendChild(card);
+    });
+  }
+
+  function openGameSession(roomId) {
+    const games = getAllStoredGames();
+    const found = games.find(g => g.roomId === roomId);
+    if (!found) {
+      showToast('Game session not found.', 'error');
+      return;
+    }
+
+    const storedSecret = localStorage.getItem(`pokertracker_secret_${roomId}`);
+    state = {
+      ...found,
+      hostSecret: storedSecret || found.hostSecret || null,
+      isHost: !!(storedSecret || found.isHost)
+    };
+
+    localStorage.setItem(STORAGE_KEY_GAME, JSON.stringify(state));
+    switchView('game');
+    initSync();
+    showToast(`Opened ${state.title}`, 'info');
+  }
+
+  function deleteSingleGameSession(roomId, title) {
+    if (!confirm(`Are you sure you want to delete "${title || 'this game'}"? All records for this game will be removed.`)) {
+      return;
+    }
+
+    removeGameFromCollection(roomId);
+
+    // If the deleted game was currently loaded in memory, reset state
+    if (state.roomId === roomId) {
+      localStorage.removeItem(STORAGE_KEY_GAME);
+      const now = new Date();
+      state = {
+        roomId: null,
+        hostSecret: null,
+        isHost: true,
+        title: getDefaultGameTitle(now),
+        date: now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }),
+        currency: state.currency || '₹',
+        defaultBuyin: state.defaultBuyin || 100,
+        soundEnabled: state.soundEnabled,
+        players: [],
+        status: 'active',
+        settlementSummary: '',
+        lastUpdated: Date.now()
+      };
+    }
+
+    renderGamesList();
+    showToast('🗑️ Game deleted successfully.', 'info');
+  }
+
+  // =========================================================================
   // View Routing (Home vs Game)
   // =========================================================================
   function switchView(viewName) {
@@ -416,8 +594,12 @@
       document.querySelectorAll('.game-only-control').forEach(el => el.style.display = 'none');
       dom.roomCodeBadge.style.display = 'none';
 
-      // Update active game preview card on Home
-      updateHomeActiveGameCard();
+      // Refresh games list on Home
+      renderGamesList();
+
+      // Refresh default title for new game with current time
+      const now = new Date();
+      dom.newGameTitleInput.value = getDefaultGameTitle(now);
 
       // Set hash without jump
       if (window.location.hash !== '#home' && !window.location.search) {
@@ -442,22 +624,6 @@
       }
 
       render();
-    }
-  }
-
-  function updateHomeActiveGameCard() {
-    if (state.roomId && state.players && state.players.length > 0) {
-      dom.homeActiveGameBanner.style.display = 'flex';
-      dom.homeActiveRoomTag.textContent = state.status === 'ended' ? `🏁 Settled · #${state.roomId}` : `#${state.roomId}`;
-      dom.homeActiveGameTitle.textContent = state.title;
-
-      let pot = 0;
-      state.players.forEach(p => {
-        pot += (p.buyIns || []).reduce((s, b) => s + (Number(b) || 0), 0);
-      });
-      dom.homeActiveGameMeta.textContent = `${state.players.length} players · Pot: ${state.currency}${pot.toLocaleString()}${state.status === 'ended' ? ' · Settled' : ''}`;
-    } else {
-      dom.homeActiveGameBanner.style.display = 'none';
     }
   }
 
@@ -497,6 +663,14 @@
 
     localStorage.setItem(`pokertracker_secret_${state.roomId}`, state.hostSecret);
     saveState();
+
+    // Reset tonight's temporary selections on home
+    selectedTonightPlayers = [];
+    renderSelectedTonightPills();
+    dom.usualPlayerSearchInput.value = '';
+    dom.btnClearSearch.style.display = 'none';
+    dom.createPlayerPrompt.style.display = 'none';
+    renderUsualPickerGrid();
 
     // Switch to Game Dashboard
     switchView('game');
@@ -562,6 +736,7 @@
     state.lastUpdated = Date.now();
     try {
       localStorage.setItem(STORAGE_KEY_GAME, JSON.stringify(state));
+      saveGameToCollection(state);
     } catch (e) {}
 
     if (state.isHost && syncManager) {
@@ -1193,6 +1368,7 @@
 
     const oldRoom = state.roomId;
     if (oldRoom) {
+      removeGameFromCollection(oldRoom);
       localStorage.removeItem(`pokertracker_secret_${oldRoom}`);
     }
     localStorage.removeItem(STORAGE_KEY_GAME);
@@ -1224,6 +1400,7 @@
     selectedTonightPlayers = [];
     renderSelectedTonightPills();
     switchView('home');
+    renderGamesList();
     showToast('🗑️ Game deleted. You can start a fresh game anytime.', 'info');
   }
 
@@ -1374,10 +1551,6 @@
 
     dom.btnNavHome.addEventListener('click', () => {
       switchView('home');
-    });
-
-    dom.btnResumeActiveGame.addEventListener('click', () => {
-      switchView('game');
     });
 
     // New Game Form submission
@@ -1667,9 +1840,6 @@
     // Post Game Choice Modal buttons
     if (dom.btnChoiceContinue) dom.btnChoiceContinue.addEventListener('click', continueGameSession);
     if (dom.btnChoiceDelete) dom.btnChoiceDelete.addEventListener('click', () => deleteGameSession(true));
-
-    // Home Active Game Delete
-    if (dom.btnDeleteActiveGameHome) dom.btnDeleteActiveGameHome.addEventListener('click', () => deleteGameSession(false));
 
     // Game Settled Banner actions
     if (dom.btnBannerViewSummary) dom.btnBannerViewSummary.addEventListener('click', viewSettlementSummaryModal);

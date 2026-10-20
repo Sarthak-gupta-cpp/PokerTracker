@@ -437,47 +437,142 @@ h1, h2, h3, h4, .font-display {
 }
 
 /* Active Game Card on Home */
-.active-game-card {
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(20, 30, 51, 0.9) 100%);
-  border: 1px solid rgba(16, 185, 129, 0.35);
-  border-radius: var(--radius-xl);
-  padding: 1.25rem 1.4rem;
-  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+/* Multi-Game Session List on Home */
+.games-list {
   display: flex;
   flex-direction: column;
-  gap: 0.85rem;
+  gap: 0.75rem;
 }
 
-.active-game-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.active-game-label {
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  color: var(--color-emerald-light);
-}
-
-.active-game-card-body {
+.game-session-card {
+  background: rgba(20, 30, 51, 0.7);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 1rem 1.15rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 1rem;
+  gap: 0.85rem;
+  transition: all var(--transition-fast);
 }
 
-.active-game-title {
-  font-size: 1.35rem;
+.game-session-card:hover {
+  border-color: var(--border-medium);
+  background: rgba(26, 38, 64, 0.85);
+}
+
+.game-session-card.is-active {
+  border-left: 3px solid var(--color-emerald);
+}
+
+.game-session-card.is-settled {
+  border-left: 3px solid var(--color-indigo);
+  opacity: 0.92;
+}
+
+.game-session-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+.game-session-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.game-session-title {
+  font-size: 1.05rem;
   font-weight: 700;
   color: #FFFFFF;
 }
 
-.active-game-meta {
-  font-size: 0.85rem;
+.game-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: var(--radius-full);
+}
+
+.game-status-badge.active {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--color-emerald-light);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.game-status-badge.settled {
+  background: rgba(99, 102, 241, 0.15);
+  color: #A5B4FC;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+}
+
+.game-session-room {
+  font-family: monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 0.15rem 0.4rem;
+  border-radius: var(--radius-sm);
+}
+
+.game-session-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
   color: var(--text-secondary);
+}
+
+.game-session-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.btn-danger-ghost {
+  background: transparent;
+  color: var(--color-rose-light);
+  border: 1px solid rgba(244, 63, 94, 0.25);
+  padding: 0.35rem 0.6rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.82rem;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
+}
+
+.btn-danger-ghost:hover {
+  background: rgba(244, 63, 94, 0.15);
+  border-color: var(--color-rose);
+}
+
+@media (max-width: 540px) {
+  .game-session-card {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 0.9rem;
+  }
+  .game-session-actions {
+    justify-content: flex-end;
+    margin-top: 0.25rem;
+  }
+  .game-session-actions .btn {
+    flex: 1;
+  }
 }
 
 /* Home Section Cards */
