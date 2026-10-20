@@ -149,6 +149,7 @@
     homeActiveGameTitle: document.getElementById('homeActiveGameTitle'),
     homeActiveGameMeta: document.getElementById('homeActiveGameMeta'),
     btnResumeActiveGame: document.getElementById('btnResumeActiveGame'),
+    btnDeleteActiveGameHome: document.getElementById('btnDeleteActiveGameHome'),
 
     // New Game Form
     newGameForm: document.getElementById('newGameForm'),
@@ -229,9 +230,23 @@
     endGamePlayersList: document.getElementById('endGamePlayersList'),
     btnCalculateSettlement: document.getElementById('btnCalculateSettlement'),
     btnEndGameBack: document.getElementById('btnEndGameBack'),
+    btnDeleteGameFromModal: document.getElementById('btnDeleteGameFromModal'),
+    btnContinueGameFromModal: document.getElementById('btnContinueGameFromModal'),
+    btnEndGameClose: document.getElementById('btnEndGameClose'),
     finalSummaryText: document.getElementById('finalSummaryText'),
     btnCopySummary: document.getElementById('btnCopySummary'),
     btnShareWhatsApp: document.getElementById('btnShareWhatsApp'),
+
+    // Game Settled Banner
+    gameEndedBanner: document.getElementById('gameEndedBanner'),
+    btnBannerViewSummary: document.getElementById('btnBannerViewSummary'),
+    btnBannerContinueGame: document.getElementById('btnBannerContinueGame'),
+    btnBannerDeleteGame: document.getElementById('btnBannerDeleteGame'),
+
+    // Post Game Choice Modal
+    modalPostGameChoice: document.getElementById('modalPostGameChoice'),
+    btnChoiceContinue: document.getElementById('btnChoiceContinue'),
+    btnChoiceDelete: document.getElementById('btnChoiceDelete'),
 
     modalShare: document.getElementById('modalShare'),
     tabSpectator: document.getElementById('tabSpectator'),
@@ -433,14 +448,14 @@
   function updateHomeActiveGameCard() {
     if (state.roomId && state.players && state.players.length > 0) {
       dom.homeActiveGameBanner.style.display = 'flex';
-      dom.homeActiveRoomTag.textContent = `#${state.roomId}`;
+      dom.homeActiveRoomTag.textContent = state.status === 'ended' ? `🏁 Settled · #${state.roomId}` : `#${state.roomId}`;
       dom.homeActiveGameTitle.textContent = state.title;
 
       let pot = 0;
       state.players.forEach(p => {
         pot += (p.buyIns || []).reduce((s, b) => s + (Number(b) || 0), 0);
       });
-      dom.homeActiveGameMeta.textContent = `${state.players.length} players · Pot: ${state.currency}${pot.toLocaleString()}`;
+      dom.homeActiveGameMeta.textContent = `${state.players.length} players · Pot: ${state.currency}${pot.toLocaleString()}${state.status === 'ended' ? ' · Settled' : ''}`;
     } else {
       dom.homeActiveGameBanner.style.display = 'none';
     }
@@ -716,6 +731,15 @@
 
     // 5. In-game usual players suggestions
     renderInGameSuggestions();
+
+    // 6. Game Ended Banner state
+    if (state.status === 'ended') {
+      if (dom.gameEndedBanner) dom.gameEndedBanner.style.display = 'flex';
+      dom.btnEndGame.innerHTML = '<span>🏁 View Settle Results</span>';
+    } else {
+      if (dom.gameEndedBanner) dom.gameEndedBanner.style.display = 'none';
+      dom.btnEndGame.innerHTML = '<span>🏁 End Game & Settle</span>';
+    }
 
     // Update settings inputs
     dom.settingCurrencyInput.value = state.currency;
@@ -1015,6 +1039,8 @@
     dom.endGameStage2.style.display = 'none';
     dom.btnEndGameBack.style.display = 'none';
     dom.btnCalculateSettlement.style.display = '';
+    if (dom.btnDeleteGameFromModal) dom.btnDeleteGameFromModal.style.display = 'none';
+    if (dom.btnContinueGameFromModal) dom.btnContinueGameFromModal.style.display = 'none';
 
     let totalPot = 0;
     state.players.forEach(p => {
@@ -1135,6 +1161,8 @@
     dom.endGameStage2.style.display = 'block';
     dom.btnEndGameBack.style.display = 'inline-flex';
     dom.btnCalculateSettlement.style.display = 'none';
+    if (dom.btnDeleteGameFromModal) dom.btnDeleteGameFromModal.style.display = 'inline-flex';
+    if (dom.btnContinueGameFromModal) dom.btnContinueGameFromModal.style.display = 'inline-flex';
 
     playChimeSound();
     if (typeof confetti === 'function') {
@@ -1146,6 +1174,73 @@
         });
       } catch (e) {}
     }
+  }
+
+  function viewSettlementSummaryModal() {
+    dom.endGameStage1.style.display = 'none';
+    dom.endGameStage2.style.display = 'block';
+    dom.btnEndGameBack.style.display = 'inline-flex';
+    dom.btnCalculateSettlement.style.display = 'none';
+    if (dom.btnDeleteGameFromModal) dom.btnDeleteGameFromModal.style.display = 'inline-flex';
+    if (dom.btnContinueGameFromModal) dom.btnContinueGameFromModal.style.display = 'inline-flex';
+    openModal(dom.modalEndGame);
+  }
+
+  function deleteGameSession(skipConfirm = false) {
+    if (!skipConfirm && !confirm('Are you sure you want to delete this game session? All buy-ins for tonight will be cleared.')) {
+      return;
+    }
+
+    const oldRoom = state.roomId;
+    if (oldRoom) {
+      localStorage.removeItem(`pokertracker_secret_${oldRoom}`);
+    }
+    localStorage.removeItem(STORAGE_KEY_GAME);
+
+    if (syncManager) {
+      syncManager.cleanup();
+      syncManager = null;
+    }
+
+    const now = new Date();
+    state = {
+      roomId: null,
+      hostSecret: null,
+      isHost: true,
+      title: getDefaultGameTitle(now),
+      date: now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }),
+      currency: state.currency || '₹',
+      defaultBuyin: state.defaultBuyin || 100,
+      soundEnabled: state.soundEnabled,
+      players: [],
+      status: 'active',
+      settlementSummary: '',
+      lastUpdated: Date.now()
+    };
+
+    closeModal(dom.modalEndGame);
+    closeModal(dom.modalPostGameChoice);
+    if (dom.gameEndedBanner) dom.gameEndedBanner.style.display = 'none';
+    selectedTonightPlayers = [];
+    renderSelectedTonightPills();
+    switchView('home');
+    showToast('🗑️ Game deleted. You can start a fresh game anytime.', 'info');
+  }
+
+  function continueGameSession() {
+    state.status = 'active';
+    state.players.forEach(p => {
+      if (!p.clockedOut) {
+        p.cashOut = null;
+      }
+    });
+
+    saveState();
+    closeModal(dom.modalEndGame);
+    closeModal(dom.modalPostGameChoice);
+    if (dom.gameEndedBanner) dom.gameEndedBanner.style.display = 'none';
+    render();
+    showToast('▶ Game resumed! You can continue adding buy-ins and playing.', 'success');
   }
 
   // =========================================================================
@@ -1546,12 +1641,40 @@
     // End Game button
     dom.btnEndGame.addEventListener('click', openEndGameModal);
     dom.btnCalculateSettlement.addEventListener('click', calculateAndDisplaySettlement);
+    // End Game modal back button
     dom.btnEndGameBack.addEventListener('click', () => {
       dom.endGameStage1.style.display = 'block';
       dom.endGameStage2.style.display = 'none';
       dom.btnEndGameBack.style.display = 'none';
       dom.btnCalculateSettlement.style.display = '';
+      if (dom.btnDeleteGameFromModal) dom.btnDeleteGameFromModal.style.display = 'none';
+      if (dom.btnContinueGameFromModal) dom.btnContinueGameFromModal.style.display = 'none';
     });
+
+    // Post Game Buttons
+    if (dom.btnDeleteGameFromModal) dom.btnDeleteGameFromModal.addEventListener('click', () => deleteGameSession(false));
+    if (dom.btnContinueGameFromModal) dom.btnContinueGameFromModal.addEventListener('click', continueGameSession);
+
+    if (dom.btnEndGameClose) {
+      dom.btnEndGameClose.addEventListener('click', () => {
+        closeModal(dom.modalEndGame);
+        if (state.status === 'ended') {
+          openModal(dom.modalPostGameChoice);
+        }
+      });
+    }
+
+    // Post Game Choice Modal buttons
+    if (dom.btnChoiceContinue) dom.btnChoiceContinue.addEventListener('click', continueGameSession);
+    if (dom.btnChoiceDelete) dom.btnChoiceDelete.addEventListener('click', () => deleteGameSession(true));
+
+    // Home Active Game Delete
+    if (dom.btnDeleteActiveGameHome) dom.btnDeleteActiveGameHome.addEventListener('click', () => deleteGameSession(false));
+
+    // Game Settled Banner actions
+    if (dom.btnBannerViewSummary) dom.btnBannerViewSummary.addEventListener('click', viewSettlementSummaryModal);
+    if (dom.btnBannerContinueGame) dom.btnBannerContinueGame.addEventListener('click', continueGameSession);
+    if (dom.btnBannerDeleteGame) dom.btnBannerDeleteGame.addEventListener('click', () => deleteGameSession(false));
 
     dom.btnCopySummary.addEventListener('click', () => {
       copyToClipboard(state.settlementSummary, '📋 Final summary copied! Paste it in WhatsApp.');
@@ -1613,6 +1736,9 @@
         if (modalId) {
           const m = document.getElementById(modalId);
           if (m) closeModal(m);
+          if (modalId === 'modalEndGame' && state.status === 'ended') {
+            openModal(dom.modalPostGameChoice);
+          }
         }
       });
     });
@@ -1621,13 +1747,20 @@
       overlay.addEventListener('click', (e) => {
         if (e.target === overlay) {
           closeModal(overlay);
+          if (overlay.id === 'modalEndGame' && state.status === 'ended') {
+            openModal(dom.modalPostGameChoice);
+          }
         }
       });
     });
 
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
-        document.querySelectorAll('.modal-overlay.active').forEach(m => closeModal(m));
+        const activeModals = Array.from(document.querySelectorAll('.modal-overlay.active'));
+        activeModals.forEach(m => closeModal(m));
+        if (activeModals.some(m => m.id === 'modalEndGame') && state.status === 'ended') {
+          openModal(dom.modalPostGameChoice);
+        }
       }
     });
   }

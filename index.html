@@ -138,6 +138,9 @@
             <button id="btnResumeActiveGame" class="btn btn-primary btn-lg">
               <span>▶ Resume Game</span>
             </button>
+            <button id="btnDeleteActiveGameHome" class="btn btn-ghost btn-sm" style="color: var(--color-rose-light);" title="Delete this game">
+              <span>🗑️ Delete</span>
+            </button>
           </div>
         </div>
       </section>
@@ -258,8 +261,23 @@
   <!-- ========================================================================= -->
   <!-- VIEW 2: ACTIVE GAME DASHBOARD -->
   <!-- ========================================================================= -->
-  <div id="viewGame" class="app-view" style="display: none;">
     <main class="container">
+
+      <!-- Game Settled Alert Banner (Visible when game has been settled) -->
+      <section id="gameEndedBanner" class="game-ended-banner" style="display: none;">
+        <div style="display: flex; align-items: center; gap: 0.65rem;">
+          <div style="font-size: 1.4rem;">🏁</div>
+          <div>
+            <div style="font-weight: 700; color: #FFFFFF; font-size: 0.95rem;">Game Settled</div>
+            <div style="font-size: 0.78rem; color: var(--text-secondary);">What would you like to do next?</div>
+          </div>
+        </div>
+        <div style="display: flex; gap: 0.45rem; align-items: center; flex-wrap: wrap;">
+          <button id="btnBannerViewSummary" class="btn btn-secondary btn-sm">📋 Summary</button>
+          <button id="btnBannerContinueGame" class="btn btn-primary btn-sm">▶ Continue Playing</button>
+          <button id="btnBannerDeleteGame" class="btn btn-danger btn-sm">🗑️ Delete Game</button>
+        </div>
+      </section>
 
       <!-- Game Title & Meta Header -->
       <section class="game-hero">
@@ -516,12 +534,60 @@
         </div>
       </div>
 
-      <div class="modal-footer">
+      <div class="modal-footer" id="endGameModalFooter">
         <button id="btnEndGameBack" class="btn btn-ghost" style="display: none;">Back</button>
-        <button class="btn btn-ghost" data-modal="modalEndGame">Close</button>
+        <button id="btnDeleteGameFromModal" class="btn btn-danger btn-sm" style="display: none;">
+          <span>🗑️ Delete Game</span>
+        </button>
+        <button id="btnContinueGameFromModal" class="btn btn-secondary btn-sm" style="display: none;">
+          <span>▶ Continue Game</span>
+        </button>
+        <button id="btnEndGameClose" class="btn btn-ghost">Close</button>
         <button id="btnCalculateSettlement" class="btn btn-primary">
           <span>Calculate Settlement ➔</span>
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Post Game Choice (Delete Game or Continue) -->
+  <div id="modalPostGameChoice" class="modal-overlay">
+    <div class="modal-card" style="max-width: 480px;">
+      <div class="modal-header">
+        <h3 class="modal-title">🏁 Game Finished</h3>
+        <button class="modal-close" data-modal="modalPostGameChoice">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="color: var(--text-secondary); margin-bottom: 1.25rem;">
+          You have settled tonight's poker game. What would you like to do?
+        </p>
+
+        <div style="display: flex; flex-direction: column; gap: 0.85rem;">
+          <!-- Option: Continue Playing -->
+          <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: var(--radius-lg); padding: 0.95rem 1.15rem; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;">
+            <div>
+              <div style="font-weight: 700; color: #FFFFFF; font-size: 0.95rem;">Continue Playing</div>
+              <div style="font-size: 0.78rem; color: var(--text-secondary);">Keep this game open to add more rebuys or play another round.</div>
+            </div>
+            <button id="btnChoiceContinue" class="btn btn-primary btn-sm" style="flex-shrink: 0;">
+              ▶ Continue
+            </button>
+          </div>
+
+          <!-- Option: Delete Game -->
+          <div style="background: rgba(244, 63, 94, 0.08); border: 1px solid rgba(244, 63, 94, 0.25); border-radius: var(--radius-lg); padding: 0.95rem 1.15rem; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;">
+            <div>
+              <div style="font-weight: 700; color: var(--color-rose-light); font-size: 0.95rem;">Delete Game</div>
+              <div style="font-size: 0.78rem; color: var(--text-secondary);">Clear this game session and return to the Home page to start fresh.</div>
+            </div>
+            <button id="btnChoiceDelete" class="btn btn-danger btn-sm" style="flex-shrink: 0;">
+              🗑️ Delete
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-modal="modalPostGameChoice">Cancel</button>
       </div>
     </div>
   </div>
