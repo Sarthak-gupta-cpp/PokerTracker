@@ -298,10 +298,9 @@
       const storedSecret = localStorage.getItem(`pokertracker_secret_${state.roomId}`);
 
       if (claimParam) {
-        state.hostSecret = claimParam;
-        state.isHost = true;
-        localStorage.setItem(`pokertracker_secret_${state.roomId}`, claimParam);
-        showToast('👑 You claimed Host authority for this game!', 'success');
+        state.pendingClaimSecret = claimParam;
+        state.isHost = false;
+        state.hostSecret = null;
         window.history.replaceState({}, '', `${window.location.pathname}?room=${state.roomId}`);
       } else if (storedSecret) {
         state.hostSecret = storedSecret;
@@ -685,12 +684,27 @@
             isHost: false,
             roomId: state.roomId
           };
+          saveState();
           render();
         }
       },
       onHostTransferred: (newHostName) => {
-        showToast(`👑 Host rights transferred to ${newHostName}!`, 'warning');
+        showToast(`👑 Host transferred to ${newHostName}. You are now Spectating.`, 'warning');
         state.isHost = false;
+        state.hostSecret = null;
+        localStorage.removeItem(`pokertracker_secret_${state.roomId}`);
+        saveState();
+        render();
+      },
+      onHostPromoted: (newSecret, latestState) => {
+        showToast('👑 You claimed Host authority for this game!', 'success');
+        state.isHost = true;
+        state.hostSecret = newSecret;
+        if (latestState) {
+          state = { ...state, ...latestState, isHost: true };
+        }
+        localStorage.setItem(`pokertracker_secret_${state.roomId}`, newSecret);
+        saveState();
         render();
       },
       onConnectionChange: ({ status, message }) => {
@@ -707,6 +721,7 @@
       roomId: state.roomId,
       hostSecret: state.hostSecret,
       isHost: state.isHost,
+      pendingClaimSecret: state.pendingClaimSecret || null,
       stateProvider: () => state
     });
   }

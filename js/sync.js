@@ -20,13 +20,18 @@
     constructor(options = {}) {
       this.onStateReceived = options.onStateReceived || (() => {});
       this.onHostTransferred = options.onHostTransferred || (() => {});
+      this.onHostPromoted = options.onHostPromoted || (() => {});
       this.onConnectionChange = options.onConnectionChange || (() => {});
       this.onViewerCountChange = options.onViewerCountChange || (() => {});
 
       this.peer = null;
-      this.roomId = null;
-      this.hostSecret = null;
-      this.isHost = false;
+      this.roomId = options.roomId || null;
+      this.hostSecret = options.hostSecret || null;
+      this.isHost = !!options.isHost;
+      this.pendingClaimSecret = options.pendingClaimSecret || null;
+      this.pendingHostSecret = null;
+      this._pendingClaimResolve = null;
+      this._pendingClaimReject = null;
       this.connections = new Map(); // For host: Map of peerId -> DataConnection
       this.hostConn = null; // For viewer: DataConnection to host
       this.isConnected = false;
@@ -54,10 +59,11 @@
     /**
      * Initialize connection based on URL params or existing local session
      */
-    init({ roomId, hostSecret, isHost, stateProvider }) {
+    init({ roomId, hostSecret, isHost, stateProvider, pendingClaimSecret }) {
       this.roomId = roomId;
       this.hostSecret = hostSecret;
       this.isHost = isHost;
+      if (pendingClaimSecret) this.pendingClaimSecret = pendingClaimSecret;
       this.getState = stateProvider || (() => this.latestState);
 
       this.cleanup();
@@ -264,6 +270,20 @@
         if (data.type === 'FULL_STATE' || data.type === 'STATE_UPDATE') {
           this.latestState = data.payload;
           this.onStateReceived(data.payload);
+
+          // If connecting with pending host claim, trigger claim now that state is received
+          if (this.pendingClaimSecret) {
+            const secret = this.pendingClaimSecret;
+            this.pendingClaimSecret = null;
+            this.claimHost(secret);
+          }
+        } else if (data.type === 'HOST_TRANSFER_CONFIRMED') {
+          this._handlePromotedToHost();
+        } else if (data.type === 'HOST_TRANSFER_DENIED') {
+          if (this._pendingClaimReject) {
+            this._pendingClaimReject(new Error(data.error || 'Invalid host transfer key'));
+            this._pendingClaimReject = null;
+          }
         } else if (data.type === 'HOST_TRANSFERRED') {
           this.onHostTransferred(data.newHostName || 'Another player');
         }
@@ -329,17 +349,30 @@
      */
     stepDownAsHost(newHostName) {
       this.isHost = false;
+      this.hostSecret = null;
+
       // Broadcast transfer notice to remaining viewers
-      for (const conn of this.connections.values()) {
+      for (const [peerId, conn] of this.connections.entries()) {
         if (conn && conn.open) {
-          conn.send({ type: 'HOST_TRANSFERRED', newHostName });
+          try {
+            conn.send({ type: 'HOST_TRANSFERRED', newHostName });
+          } catch (e) {}
         }
       }
 
       this.cleanup();
+      if (this.peer && !this.peer.destroyed) {
+        try { this.peer.destroy(); } catch (e) {}
+        this.peer = null;
+      }
+      this.connections.clear();
+
       this.onHostTransferred(newHostName);
-      // Restart as viewer
-      this._startViewer();
+
+      // Restart as viewer after host peer ID is freed
+      setTimeout(() => {
+        this._startViewer();
+      }, 1200);
     }
 
     /**
@@ -347,16 +380,50 @@
      */
     claimHost(secret, newHostName = 'Host') {
       return new Promise((resolve, reject) => {
-        if (secret !== this.hostSecret) {
-          return reject(new Error('Invalid host transfer key'));
-        }
+        this.pendingHostSecret = secret;
+        this._pendingClaimResolve = resolve;
+        this._pendingClaimReject = reject;
 
-        // Promote to host
-        this.isHost = true;
-        this.cleanup();
-        this._startHost();
-        resolve(true);
+        if (this.hostConn && this.hostConn.open) {
+          this.hostConn.send({
+            type: 'CLAIM_HOST',
+            secret: secret,
+            newHostName: newHostName
+          });
+        } else {
+          this.pendingClaimSecret = secret;
+          this.onConnectionChange({
+            status: 'connecting',
+            role: 'viewer',
+            message: 'Connecting to Host to claim rights...'
+          });
+        }
       });
+    }
+
+    _handlePromotedToHost() {
+      this.isHost = true;
+      this.hostSecret = this.pendingHostSecret || this.hostSecret;
+      this.pendingHostSecret = null;
+
+      if (this._pendingClaimResolve) {
+        this._pendingClaimResolve(true);
+        this._pendingClaimResolve = null;
+      }
+
+      this.onHostPromoted(this.hostSecret, this.latestState);
+
+      // Clean up viewer peer
+      this.cleanup();
+      if (this.peer && !this.peer.destroyed) {
+        try { this.peer.destroy(); } catch (e) {}
+        this.peer = null;
+      }
+
+      // Claim host peer ID
+      setTimeout(() => {
+        this._startHost();
+      }, 800);
     }
 
     cleanup() {
