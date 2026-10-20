@@ -1,6 +1,6 @@
 /**
  * PokerTracker - Main Application Controller
- * Manages game state, player ledger, UI interactions, sound effects, and P2P live sync.
+ * Manages Home Page, Usual Players Roster, Live Game Ledger, P2P Sync, and Audio.
  */
 
 (function () {
@@ -8,8 +8,14 @@
 
   // Storage Keys
   const STORAGE_KEY_GAME = 'pokertracker_game_state_v1';
-  const STORAGE_KEY_RECENT = 'pokertracker_recent_players';
+  const STORAGE_KEY_USUAL = 'pokertracker_usual_players_v1';
   const STORAGE_KEY_SETTINGS = 'pokertracker_user_settings';
+
+  // Default Usual Players sample for first-time poker hosts
+  const DEFAULT_SAMPLE_PLAYERS = ['Sam', 'Vidit', 'Kalash', 'Megh', 'Aarav', 'Ishaan', 'Adit'];
+
+  // Current Active View
+  let currentView = 'home'; // 'home' | 'game'
 
   // Application State
   let state = {
@@ -27,11 +33,14 @@
     lastUpdated: Date.now()
   };
 
+  // Usual Players Roster (array of strings)
+  let usualPlayers = [];
+
+  // Temporary selection for New Game setup
+  let selectedTonightPlayers = [];
+
   // Active sync manager instance
   let syncManager = null;
-  let qrcodeInstance = null;
-
-  // Selected player for modals
   let activeModalPlayerId = null;
 
   // Audio Context for chip & chime sounds
@@ -102,14 +111,60 @@
   // DOM Elements
   // =========================================================================
   const dom = {
+    // Views
+    viewHome: document.getElementById('viewHome'),
+    viewGame: document.getElementById('viewGame'),
     brandLink: document.getElementById('brandLink'),
+    btnNavHome: document.getElementById('btnNavHome'),
+
+    // Header Status & Actions
     syncDot: document.getElementById('syncDot'),
     syncStatusText: document.getElementById('syncStatusText'),
     roomCodeBadge: document.getElementById('roomCodeBadge'),
     spectatorBanner: document.getElementById('spectatorBanner'),
     btnClaimHostPrompt: document.getElementById('btnClaimHostPrompt'),
-    
-    // Hero & Stats
+    btnShareLive: document.getElementById('btnShareLive'),
+    btnTransferHost: document.getElementById('btnTransferHost'),
+    btnHeaderNewGame: document.getElementById('btnHeaderNewGame'),
+    btnSettings: document.getElementById('btnSettings'),
+
+    // Home View Elements
+    homeActiveGameBanner: document.getElementById('homeActiveGameBanner'),
+    homeActiveRoomTag: document.getElementById('homeActiveRoomTag'),
+    homeActiveGameTitle: document.getElementById('homeActiveGameTitle'),
+    homeActiveGameMeta: document.getElementById('homeActiveGameMeta'),
+    btnResumeActiveGame: document.getElementById('btnResumeActiveGame'),
+
+    // New Game Form
+    newGameForm: document.getElementById('newGameForm'),
+    newGameTitleInput: document.getElementById('newGameTitleInput'),
+    newGameDefaultBuyin: document.getElementById('newGameDefaultBuyin'),
+    newGameCurrencyTag: document.getElementById('newGameCurrencyTag'),
+    selectedPlayersList: document.getElementById('selectedPlayersList'),
+    selectedPlayersEmptyMsg: document.getElementById('selectedPlayersEmptyMsg'),
+    selectedPlayersCount: document.getElementById('selectedPlayersCount'),
+    launchPlayerCount: document.getElementById('launchPlayerCount'),
+    btnClearSelectedPlayers: document.getElementById('btnClearSelectedPlayers'),
+
+    // Search & Picker for New Game
+    usualPlayerSearchInput: document.getElementById('usualPlayerSearchInput'),
+    btnClearSearch: document.getElementById('btnClearSearch'),
+    createPlayerPrompt: document.getElementById('createPlayerPrompt'),
+    createPlayerPromptName: document.getElementById('createPlayerPromptName'),
+    btnCreateNewPlayer: document.getElementById('btnCreateNewPlayer'),
+    availableUsualCount: document.getElementById('availableUsualCount'),
+    btnAddAllUsual: document.getElementById('btnAddAllUsual'),
+    usualPlayersPickerGrid: document.getElementById('usualPlayersPickerGrid'),
+    btnLaunchNewGame: document.getElementById('btnLaunchNewGame'),
+
+    // Usual Players Roster
+    addUsualPlayerForm: document.getElementById('addUsualPlayerForm'),
+    addUsualPlayerInput: document.getElementById('addUsualPlayerInput'),
+    rosterChipsList: document.getElementById('rosterChipsList'),
+    emptyRosterMsg: document.getElementById('emptyRosterMsg'),
+    btnLoadSampleRoster: document.getElementById('btnLoadSampleRoster'),
+
+    // Game View Hero & Stats
     gameTitleInput: document.getElementById('gameTitleInput'),
     gameDateText: document.getElementById('gameDateText'),
     totalPotValue: document.getElementById('totalPotValue'),
@@ -122,10 +177,11 @@
     bottomBarPot: document.getElementById('bottomBarPot'),
     viewerBottomNotice: document.getElementById('viewerBottomNotice'),
 
-    // Add Player Section
+    // In-game Add Player Section
     addPlayerSection: document.getElementById('addPlayerSection'),
     addPlayerForm: document.getElementById('addPlayerForm'),
     playerNameInput: document.getElementById('playerNameInput'),
+    inGamePlayerSuggestions: document.getElementById('inGamePlayerSuggestions'),
     quickSuggestionsWrap: document.getElementById('quickSuggestionsWrap'),
     suggestionsList: document.getElementById('suggestionsList'),
 
@@ -133,12 +189,6 @@
     playersGrid: document.getElementById('playersGrid'),
     emptyPlayersState: document.getElementById('emptyPlayersState'),
     playerTotalBadge: document.getElementById('playerTotalBadge'),
-
-    // Header buttons
-    btnShareLive: document.getElementById('btnShareLive'),
-    btnTransferHost: document.getElementById('btnTransferHost'),
-    btnSettings: document.getElementById('btnSettings'),
-    btnNewGame: document.getElementById('btnNewGame'),
     btnEndGame: document.getElementById('btnEndGame'),
 
     // Modals
@@ -190,25 +240,20 @@
   };
 
   // =========================================================================
-  // Initialization & URL Routing
+  // Initialization & Storage
   // =========================================================================
   function init() {
+    loadSettings();
+    loadUsualPlayers();
+
     const urlParams = new URLSearchParams(window.location.search);
     const roomParam = urlParams.get('room');
     const claimParam = urlParams.get('claim');
 
-    // Load saved settings if any
-    try {
-      const savedSettings = JSON.parse(localStorage.getItem(STORAGE_KEY_SETTINGS) || '{}');
-      if (savedSettings.currency) state.currency = savedSettings.currency;
-      if (savedSettings.defaultBuyin) state.defaultBuyin = Number(savedSettings.defaultBuyin);
-      if (typeof savedSettings.soundEnabled === 'boolean') state.soundEnabled = savedSettings.soundEnabled;
-    } catch (e) {}
-
-    // Set default date formatted (e.g. "Tuesday, Oct 20")
+    // Default formatted date (e.g. "Tuesday, Oct 20")
     const now = new Date();
     state.date = now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
-    state.title = `${now.toLocaleDateString('en-US', { weekday: 'long' })} Night Poker`;
+    const defaultTitle = `${now.toLocaleDateString('en-US', { weekday: 'long' })} Night Poker`;
 
     let savedGame = null;
     try {
@@ -216,24 +261,20 @@
     } catch (e) {}
 
     if (roomParam) {
-      // Joined via Room Link
+      // Direct room link opened -> enter game view
       state.roomId = roomParam.toUpperCase();
       const storedSecret = localStorage.getItem(`pokertracker_secret_${state.roomId}`);
 
       if (claimParam) {
-        // Player opened a Host Transfer link!
         state.hostSecret = claimParam;
         state.isHost = true;
         localStorage.setItem(`pokertracker_secret_${state.roomId}`, claimParam);
         showToast('👑 You claimed Host authority for this game!', 'success');
-        // Clean URL to prevent accidental re-claim
         window.history.replaceState({}, '', `${window.location.pathname}?room=${state.roomId}`);
       } else if (storedSecret) {
-        // We are already the host of this room
         state.hostSecret = storedSecret;
         state.isHost = true;
       } else {
-        // Viewer mode
         state.isHost = false;
         state.hostSecret = null;
       }
@@ -241,37 +282,196 @@
       if (savedGame && savedGame.roomId === state.roomId) {
         state = { ...state, ...savedGame, isHost: state.isHost };
       }
+
+      switchView('game');
+      initSync();
     } else {
-      // No room in URL: resume last hosted game or create new
-      if (savedGame && savedGame.roomId && savedGame.isHost) {
+      // Visiting Home
+      if (savedGame && savedGame.roomId) {
         state = { ...state, ...savedGame };
       } else {
-        createNewGame();
+        state.title = defaultTitle;
+      }
+
+      // Check if hash is #game and we have an active game
+      if (window.location.hash === '#game' && state.roomId && state.players.length > 0) {
+        switchView('game');
+        initSync();
+      } else {
+        switchView('home');
       }
     }
 
-    // Initialize P2P Live Sync
-    initSync();
+    // Populate Home Form Defaults
+    dom.newGameTitleInput.value = state.title || defaultTitle;
+    dom.newGameDefaultBuyin.value = state.defaultBuyin || 200;
+    dom.newGameCurrencyTag.textContent = state.currency || '₹';
 
-    // Render Initial UI
     render();
-    renderRecentSuggestions();
+    renderUsualRoster();
+    renderUsualPickerGrid();
     bindEvents();
   }
 
-  function createNewGame() {
+  function loadSettings() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY_SETTINGS) || '{}');
+      if (saved.currency) state.currency = saved.currency;
+      if (saved.defaultBuyin) state.defaultBuyin = Number(saved.defaultBuyin);
+      if (typeof saved.soundEnabled === 'boolean') state.soundEnabled = saved.soundEnabled;
+    } catch (e) {}
+  }
+
+  function loadUsualPlayers() {
+    try {
+      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY_USUAL) || 'null');
+      if (Array.isArray(stored)) {
+        usualPlayers = stored;
+      } else {
+        // Pre-populate sample on first visit
+        usualPlayers = [...DEFAULT_SAMPLE_PLAYERS];
+        saveUsualPlayers();
+      }
+    } catch (e) {
+      usualPlayers = [...DEFAULT_SAMPLE_PLAYERS];
+    }
+  }
+
+  function saveUsualPlayers() {
+    try {
+      localStorage.setItem(STORAGE_KEY_USUAL, JSON.stringify(usualPlayers));
+    } catch (e) {}
+  }
+
+  function addUsualPlayer(name) {
+    name = (name || '').trim();
+    if (!name) return false;
+
+    const exists = usualPlayers.some(p => p.toLowerCase() === name.toLowerCase());
+    if (exists) {
+      showToast(`"${name}" is already in your usual roster!`, 'warning');
+      return false;
+    }
+
+    usualPlayers.push(name);
+    saveUsualPlayers();
+    renderUsualRoster();
+    renderUsualPickerGrid();
+    renderInGameSuggestions();
+    showToast(`Added ${name} to Usual Players`, 'success');
+    return true;
+  }
+
+  function removeUsualPlayer(name) {
+    usualPlayers = usualPlayers.filter(p => p.toLowerCase() !== name.toLowerCase());
+    saveUsualPlayers();
+    renderUsualRoster();
+    renderUsualPickerGrid();
+    renderInGameSuggestions();
+    showToast(`Removed ${name} from Usual Players`, 'warning');
+  }
+
+  // =========================================================================
+  // View Routing (Home vs Game)
+  // =========================================================================
+  function switchView(viewName) {
+    currentView = viewName;
+
+    if (viewName === 'home') {
+      dom.viewHome.style.display = 'block';
+      dom.viewGame.style.display = 'none';
+
+      // Hide game-specific controls in header
+      document.querySelectorAll('.game-only-control').forEach(el => el.style.display = 'none');
+      dom.roomCodeBadge.style.display = 'none';
+
+      // Update active game preview card on Home
+      updateHomeActiveGameCard();
+
+      // Set hash without jump
+      if (window.location.hash !== '#home' && !window.location.search) {
+        history.replaceState(null, '', '#home');
+      }
+    } else {
+      dom.viewHome.style.display = 'none';
+      dom.viewGame.style.display = 'block';
+
+      // Show game controls
+      document.querySelectorAll('.game-only-control').forEach(el => {
+        if (el.classList.contains('host-only-control') && !state.isHost) {
+          el.style.display = 'none';
+        } else {
+          el.style.display = '';
+        }
+      });
+      dom.roomCodeBadge.style.display = '';
+
+      if (window.location.hash !== '#game' && !window.location.search) {
+        history.replaceState(null, '', '#game');
+      }
+
+      render();
+    }
+  }
+
+  function updateHomeActiveGameCard() {
+    if (state.roomId && state.players && state.players.length > 0) {
+      dom.homeActiveGameBanner.style.display = 'flex';
+      dom.homeActiveRoomTag.textContent = `#${state.roomId}`;
+      dom.homeActiveGameTitle.textContent = state.title;
+
+      let pot = 0;
+      state.players.forEach(p => {
+        pot += (p.buyIns || []).reduce((s, b) => s + (Number(b) || 0), 0);
+      });
+      dom.homeActiveGameMeta.textContent = `${state.players.length} players · Pot: ${state.currency}${pot.toLocaleString()}`;
+    } else {
+      dom.homeActiveGameBanner.style.display = 'none';
+    }
+  }
+
+  // =========================================================================
+  // Game Setup & Initialization
+  // =========================================================================
+  function createAndLaunchGame() {
+    const title = dom.newGameTitleInput.value.trim() || 'Poker Night';
+    const defaultBuyin = Number(dom.newGameDefaultBuyin.value) || 200;
+
+    if (selectedTonightPlayers.length === 0) {
+      showToast('Please add at least 1 player to start the game!', 'warning');
+      dom.usualPlayerSearchInput.focus();
+      return;
+    }
+
     state.roomId = PokerSync.SyncManager.generateRoomId();
     state.hostSecret = PokerSync.SyncManager.generateSecret();
     state.isHost = true;
-    state.players = [];
+    state.title = title;
+    state.defaultBuyin = defaultBuyin;
     state.status = 'active';
     state.settlementSummary = '';
+
     const now = new Date();
     state.date = now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
-    state.title = `${now.toLocaleDateString('en-US', { weekday: 'long' })} Night Poker`;
+
+    // Build player roster with 1 default buy-in each
+    state.players = selectedTonightPlayers.map(name => ({
+      id: 'p_' + Math.random().toString(36).substring(2, 9),
+      name,
+      buyIns: [defaultBuyin],
+      clockedOut: false,
+      cashOut: null,
+      clockOutTime: null
+    }));
 
     localStorage.setItem(`pokertracker_secret_${state.roomId}`, state.hostSecret);
     saveState();
+
+    // Switch to Game Dashboard
+    switchView('game');
+    initSync();
+    playChimeSound();
+    showToast(`Game launched with ${state.players.length} players!`, 'success');
   }
 
   function initSync() {
@@ -280,10 +480,9 @@
     syncManager = new PokerSync.SyncManager({
       onStateReceived: (remoteState) => {
         if (!state.isHost) {
-          // Viewers sync to host state
           state = {
             ...remoteState,
-            isHost: false, // viewer stays viewer
+            isHost: false,
             roomId: state.roomId
           };
           render();
@@ -294,7 +493,7 @@
         state.isHost = false;
         render();
       },
-      onConnectionChange: ({ status, role, message }) => {
+      onConnectionChange: ({ status, message }) => {
         updateSyncStatusUI(status, message);
       },
       onViewerCountChange: (count) => {
@@ -325,7 +524,7 @@
       dom.syncStatusText.textContent = 'Offline';
     }
 
-    dom.roomCodeBadge.textContent = `#${state.roomId}`;
+    dom.roomCodeBadge.textContent = state.roomId ? `#${state.roomId}` : '';
   }
 
   function saveState() {
@@ -334,16 +533,114 @@
       localStorage.setItem(STORAGE_KEY_GAME, JSON.stringify(state));
     } catch (e) {}
 
-    // Broadcast to viewers if host
     if (state.isHost && syncManager) {
       syncManager.broadcastState(state);
     }
   }
 
   // =========================================================================
-  // Rendering
+  // Home View Rendering (Selected Players & Usual Players Picker)
+  // =========================================================================
+  function renderSelectedTonightPills() {
+    dom.selectedPlayersList.innerHTML = '';
+    const count = selectedTonightPlayers.length;
+    dom.selectedPlayersCount.textContent = count;
+    dom.launchPlayerCount.textContent = count;
+
+    if (count === 0) {
+      dom.selectedPlayersEmptyMsg.style.display = 'block';
+      dom.selectedPlayersList.appendChild(dom.selectedPlayersEmptyMsg);
+      dom.btnClearSelectedPlayers.style.display = 'none';
+    } else {
+      dom.selectedPlayersEmptyMsg.style.display = 'none';
+      dom.btnClearSelectedPlayers.style.display = 'inline-block';
+
+      selectedTonightPlayers.forEach(name => {
+        const chip = document.createElement('span');
+        chip.className = 'selected-player-chip';
+        chip.innerHTML = `
+          <span>${escapeHtml(name)}</span>
+          <button type="button" class="remove-chip-btn" data-name="${escapeHtml(name)}" title="Remove ${escapeHtml(name)}">&times;</button>
+        `;
+        dom.selectedPlayersList.appendChild(chip);
+      });
+    }
+
+    renderUsualPickerGrid();
+  }
+
+  function renderUsualPickerGrid() {
+    const query = (dom.usualPlayerSearchInput.value || '').trim().toLowerCase();
+    dom.usualPlayersPickerGrid.innerHTML = '';
+
+    // Filter usual players based on search query
+    const filtered = usualPlayers.filter(p => p.toLowerCase().includes(query));
+    dom.availableUsualCount.textContent = usualPlayers.length;
+
+    // Check if query is new (not in usual players and not empty)
+    const exactMatch = usualPlayers.some(p => p.toLowerCase() === query);
+    if (query && !exactMatch) {
+      dom.createPlayerPrompt.style.display = 'flex';
+      dom.createPlayerPromptName.textContent = dom.usualPlayerSearchInput.value.trim();
+    } else {
+      dom.createPlayerPrompt.style.display = 'none';
+    }
+
+    if (filtered.length === 0 && !query) {
+      dom.usualPlayersPickerGrid.innerHTML = `
+        <div style="grid-column: 1/-1; font-size: 0.8rem; color: var(--text-muted); padding: 0.5rem 0;">
+          No usual players saved. Add some in the roster below!
+        </div>
+      `;
+      return;
+    }
+
+    filtered.forEach(name => {
+      const isSelected = selectedTonightPlayers.some(p => p.toLowerCase() === name.toLowerCase());
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `usual-player-card-btn ${isSelected ? 'is-selected' : ''}`;
+      btn.innerHTML = `
+        <span class="truncate">${escapeHtml(name)}</span>
+        <span class="plus-badge">${isSelected ? '✓' : '+'}</span>
+      `;
+
+      if (!isSelected) {
+        btn.addEventListener('click', () => {
+          selectedTonightPlayers.push(name);
+          playChipSound();
+          renderSelectedTonightPills();
+        });
+      }
+
+      dom.usualPlayersPickerGrid.appendChild(btn);
+    });
+  }
+
+  function renderUsualRoster() {
+    dom.rosterChipsList.innerHTML = '';
+    if (usualPlayers.length === 0) {
+      dom.emptyRosterMsg.style.display = 'block';
+    } else {
+      dom.emptyRosterMsg.style.display = 'none';
+      usualPlayers.forEach(name => {
+        const chip = document.createElement('span');
+        chip.className = 'roster-chip';
+        chip.innerHTML = `
+          <span>${escapeHtml(name)}</span>
+          <button type="button" class="roster-chip-remove" data-name="${escapeHtml(name)}" title="Remove ${escapeHtml(name)}">&times;</button>
+        `;
+        dom.rosterChipsList.appendChild(chip);
+      });
+    }
+  }
+
+  // =========================================================================
+  // Game View Rendering
   // =========================================================================
   function render() {
+    if (currentView !== 'game') return;
+
     // 1. Host vs Spectator Mode UI adjustments
     document.querySelectorAll('.host-only-control').forEach(el => {
       el.style.display = state.isHost ? '' : 'none';
@@ -401,10 +698,27 @@
       });
     }
 
+    // 5. In-game usual players suggestions
+    renderInGameSuggestions();
+
     // Update settings inputs
     dom.settingCurrencyInput.value = state.currency;
     dom.settingDefaultBuyinInput.value = state.defaultBuyin;
     dom.settingSoundToggle.checked = state.soundEnabled;
+  }
+
+  function renderInGameSuggestions() {
+    const activeNames = state.players.map(p => p.name.toLowerCase());
+    const available = usualPlayers.filter(n => !activeNames.includes(n.toLowerCase()));
+
+    if (available.length > 0) {
+      dom.quickSuggestionsWrap.style.display = 'flex';
+      dom.suggestionsList.innerHTML = available.slice(0, 8)
+        .map(n => `<button type="button" class="suggestion-chip in-game-quick-add" data-name="${escapeHtml(n)}">+ ${escapeHtml(n)}</button>`)
+        .join('');
+    } else {
+      dom.quickSuggestionsWrap.style.display = 'none';
+    }
   }
 
   function createPlayerCardElement(player) {
@@ -416,17 +730,14 @@
     const buyinCount = (player.buyIns || []).length;
     const initial = (player.name || '?').charAt(0).toUpperCase();
 
-    // Suit icon based on player ID hash
     const suits = ['♠', '♥', '♦', '♣'];
     const suit = suits[Math.abs(player.id.split('').reduce((a, b) => a + b.charCodeAt(0), 0)) % 4];
 
-    // Card Header
     let statusBadgeHtml = '';
     if (player.clockedOut) {
       statusBadgeHtml = `<div class="player-clocked-badge">⏱️ Clocked Out</div>`;
     }
 
-    // Menu options for host
     let menuBtnHtml = '';
     if (state.isHost) {
       menuBtnHtml = `
@@ -439,18 +750,16 @@
       `;
     }
 
-    // Chips Pills
     let chipsHtml = '';
     (player.buyIns || []).forEach((b, idx) => {
       chipsHtml += `
         <span class="buyin-chip">
           <span>${state.currency}${Number(b).toLocaleString()}</span>
-          ${state.isHost ? `<button class="buyin-chip-remove" data-player-id="${player.id}" data-chip-idx="${idx}" title="Remove this buy-in">×</button>` : ''}
+          ${state.isHost ? `<button class="buyin-chip-remove" data-player-id="${player.id}" data-chip-idx="${idx}" title="Remove buy-in">×</button>` : ''}
         </span>
       `;
     });
 
-    // Body content: Active vs Clocked Out
     let bodyHtml = '';
     let footerHtml = '';
 
@@ -469,11 +778,11 @@
       bodyHtml = `
         <div class="clocked-out-summary">
           <div>
-            <div style="font-size: 0.72rem; color: var(--text-secondary); text-transform: uppercase;">Cashed Out</div>
+            <div style="font-size: 0.7rem; color: var(--text-secondary); text-transform: uppercase;">Cashed Out</div>
             <div style="font-family: var(--font-display); font-size: 1.2rem; font-weight: 700; color: #FFFFFF;">
               ${state.currency}${Number(player.cashOut || 0).toLocaleString()}
             </div>
-            <div style="font-size: 0.72rem; color: var(--text-muted);">From ${state.currency}${totalBuyin.toLocaleString()} bought in</div>
+            <div style="font-size: 0.7rem; color: var(--text-muted);">From ${state.currency}${totalBuyin.toLocaleString()} bought in</div>
           </div>
           <div class="clockout-net-badge ${netClass}">${netStr}</div>
         </div>
@@ -481,7 +790,7 @@
 
       if (state.isHost) {
         footerHtml = `
-          <div style="display: flex; gap: 0.5rem;">
+          <div style="display: flex; gap: 0.5rem; margin-top: auto;">
             <button class="btn btn-secondary btn-sm btn-reopen-clockout" data-id="${player.id}" style="flex: 1;">
               Edit Cash-out
             </button>
@@ -547,35 +856,38 @@
   }
 
   // =========================================================================
-  // Player Actions (Add, Buy-in, Rebuy, Clock-out)
+  // Game Actions (Add, Buy-in, Rebuy, Clock-out)
   // =========================================================================
-  function addPlayer(name) {
+  function addPlayerToGame(name) {
     name = (name || '').trim();
     if (!name) return;
 
-    // Check duplicate
     const exists = state.players.some(p => p.name.toLowerCase() === name.toLowerCase());
     if (exists) {
-      showToast(`Player "${name}" is already in the game!`, 'warning');
+      showToast(`Player "${name}" is already at the table!`, 'warning');
       return;
     }
 
     const newPlayer = {
       id: 'p_' + Math.random().toString(36).substring(2, 9),
       name,
-      buyIns: [state.defaultBuyin], // Start with 1 default buy-in immediately
+      buyIns: [state.defaultBuyin],
       clockedOut: false,
       cashOut: null,
       clockOutTime: null
     };
 
     state.players.push(newPlayer);
-    rememberPlayerName(name);
+
+    // Also remember in usual players if not present
+    if (!usualPlayers.some(p => p.toLowerCase() === name.toLowerCase())) {
+      usualPlayers.push(name);
+      saveUsualPlayers();
+    }
+
     playChipSound();
     saveState();
     render();
-    renderRecentSuggestions();
-
     showToast(`Added ${name} with initial ${state.currency}${state.defaultBuyin} buy-in`, 'success');
   }
 
@@ -590,7 +902,6 @@
     saveState();
     render();
 
-    // Trigger pop animation on card
     const card = document.getElementById(`card-${playerId}`);
     if (card) {
       card.classList.remove('animate-pop');
@@ -660,14 +971,14 @@
 
     saveState();
     render();
-    showToast(`${player.name} has rejoined the active game!`, 'success');
+    showToast(`${player.name} rejoined the active game!`, 'success');
   }
 
   function removePlayer(playerId) {
     const player = state.players.find(p => p.id === playerId);
     if (!player) return;
 
-    if (confirm(`Are you sure you want to remove "${player.name}" from the game?`)) {
+    if (confirm(`Remove "${player.name}" from the game?`)) {
       state.players = state.players.filter(p => p.id !== playerId);
       saveState();
       render();
@@ -684,20 +995,17 @@
       return;
     }
 
-    // Reset view to Stage 1
     dom.endGameStage1.style.display = 'block';
     dom.endGameStage2.style.display = 'none';
     dom.btnEndGameBack.style.display = 'none';
     dom.btnCalculateSettlement.style.display = '';
 
-    // Calculate total pot
     let totalPot = 0;
     state.players.forEach(p => {
       totalPot += (p.buyIns || []).reduce((s, b) => s + (Number(b) || 0), 0);
     });
     dom.reconcilePot.textContent = `${state.currency}${totalPot.toLocaleString()}`;
 
-    // Render Stage 1 input rows for all active (non-clocked-out) players
     dom.endGamePlayersList.innerHTML = '';
     const activePlayers = state.players.filter(p => !p.clockedOut);
 
@@ -726,7 +1034,6 @@
       });
     }
 
-    // Attach real-time input change listeners for balance tally
     dom.endGamePlayersList.querySelectorAll('.end-game-count-input').forEach(inp => {
       inp.addEventListener('input', updateReconcileTally);
     });
@@ -750,7 +1057,6 @@
     let totalPot = 0;
     let totalCounted = 0;
 
-    // Sum clocked out cash-outs
     state.players.forEach(p => {
       totalPot += (p.buyIns || []).reduce((s, b) => s + (Number(b) || 0), 0);
       if (p.clockedOut) {
@@ -758,7 +1064,6 @@
       }
     });
 
-    // Sum stage 1 input fields
     dom.endGamePlayersList.querySelectorAll('.end-game-count-input').forEach(inp => {
       totalCounted += Number(inp.value) || 0;
     });
@@ -770,20 +1075,19 @@
     if (Math.abs(diff) < 0.01) {
       dom.reconcileBox.classList.remove('has-error');
       dom.reconcileStatusText.className = 'reconcile-status status-ok';
-      dom.reconcileStatusText.textContent = `✓ Perfectly Balanced (${state.currency}${totalCounted.toLocaleString()})`;
+      dom.reconcileStatusText.textContent = `✓ Balanced (${state.currency}${totalCounted.toLocaleString()})`;
     } else if (diff > 0) {
       dom.reconcileBox.classList.add('has-error');
       dom.reconcileStatusText.className = 'reconcile-status status-error';
-      dom.reconcileStatusText.textContent = `⚠️ +${state.currency}${diff.toLocaleString()} extra chips counted`;
+      dom.reconcileStatusText.textContent = `⚠️ +${state.currency}${diff.toLocaleString()} extra counted`;
     } else {
       dom.reconcileBox.classList.add('has-error');
       dom.reconcileStatusText.className = 'reconcile-status status-error';
-      dom.reconcileStatusText.textContent = `⚠️ −${state.currency}${Math.abs(diff).toLocaleString()} chips missing`;
+      dom.reconcileStatusText.textContent = `⚠️ −${state.currency}${Math.abs(diff).toLocaleString()} missing`;
     }
   }
 
   function calculateAndDisplaySettlement() {
-    // 1. Gather counts from inputs and update state
     dom.endGamePlayersList.querySelectorAll('.end-game-count-input').forEach(inp => {
       const pId = inp.dataset.playerId;
       const val = Number(inp.value) || 0;
@@ -793,11 +1097,8 @@
       }
     });
 
-    // 2. Run Settlement Engine
     const leaderboard = PokerSettlement.calculateLeaderboard(state.players, state.currency);
     const transactions = PokerSettlement.calculateSettlement(leaderboard);
-
-    // 3. Generate Live Game URL for the summary
     const gameUrl = syncManager ? syncManager.getSpectatorUrl() : window.location.href;
 
     const summaryText = PokerSettlement.generateSummaryText({
@@ -813,14 +1114,12 @@
     state.status = 'ended';
     saveState();
 
-    // 4. Update Modal to Stage 2
     dom.finalSummaryText.textContent = summaryText;
     dom.endGameStage1.style.display = 'none';
     dom.endGameStage2.style.display = 'block';
     dom.btnEndGameBack.style.display = 'inline-flex';
     dom.btnCalculateSettlement.style.display = 'none';
 
-    // 5. Celebration burst & Chime!
     playChimeSound();
     if (typeof confetti === 'function') {
       try {
@@ -830,38 +1129,6 @@
           origin: { y: 0.6 }
         });
       } catch (e) {}
-    }
-  }
-
-  // =========================================================================
-  // Recent Players Roster Persistence
-  // =========================================================================
-  function rememberPlayerName(name) {
-    try {
-      let recent = JSON.parse(localStorage.getItem(STORAGE_KEY_RECENT) || '[]');
-      recent = recent.filter(n => n.toLowerCase() !== name.toLowerCase());
-      recent.unshift(name);
-      if (recent.length > 15) recent.pop();
-      localStorage.setItem(STORAGE_KEY_RECENT, JSON.stringify(recent));
-    } catch (e) {}
-  }
-
-  function renderRecentSuggestions() {
-    try {
-      const recent = JSON.parse(localStorage.getItem(STORAGE_KEY_RECENT) || '[]');
-      const activeNames = state.players.map(p => p.name.toLowerCase());
-      const available = recent.filter(n => !activeNames.includes(n.toLowerCase())).slice(0, 8);
-
-      if (available.length > 0) {
-        dom.quickSuggestionsWrap.style.display = 'flex';
-        dom.suggestionsList.innerHTML = available
-          .map(n => `<button type="button" class="suggestion-chip" data-name="${escapeHtml(n)}">+ ${escapeHtml(n)}</button>`)
-          .join('');
-      } else {
-        dom.quickSuggestionsWrap.style.display = 'none';
-      }
-    } catch (e) {
-      dom.quickSuggestionsWrap.style.display = 'none';
     }
   }
 
@@ -877,7 +1144,6 @@
     dom.spectatorLinkInput.value = spectatorUrl;
     dom.hostTransferLinkInput.value = hostTransferUrl;
 
-    // Generate QR Code for fast table scanning
     dom.qrcodeWrapper.innerHTML = '';
     if (typeof QRCode !== 'undefined') {
       try {
@@ -894,7 +1160,6 @@
       }
     }
 
-    // Populate players list for direct host handoff
     dom.transferPlayersList.innerHTML = '';
     state.players.forEach(p => {
       const btn = document.createElement('button');
@@ -981,7 +1246,7 @@
       document.execCommand('copy');
       showToast(successMsg, 'success');
     } catch (e) {
-      showToast('Could not auto-copy. Please select and copy manually.', 'warning');
+      showToast('Could not auto-copy. Please select manually.', 'warning');
     }
     ta.remove();
   }
@@ -990,28 +1255,142 @@
   // Event Bindings
   // =========================================================================
   function bindEvents() {
-    // Game Title input
+    // Brand link & Home nav
+    dom.brandLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      switchView('home');
+    });
+
+    dom.btnNavHome.addEventListener('click', () => {
+      switchView('home');
+    });
+
+    dom.btnResumeActiveGame.addEventListener('click', () => {
+      switchView('game');
+    });
+
+    // New Game Form submission
+    dom.newGameForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      createAndLaunchGame();
+    });
+
+    // Usual Player Search filtering on Home
+    dom.usualPlayerSearchInput.addEventListener('input', () => {
+      const q = dom.usualPlayerSearchInput.value.trim();
+      dom.btnClearSearch.style.display = q ? 'block' : 'none';
+      renderUsualPickerGrid();
+    });
+
+    dom.btnClearSearch.addEventListener('click', () => {
+      dom.usualPlayerSearchInput.value = '';
+      dom.btnClearSearch.style.display = 'none';
+      renderUsualPickerGrid();
+      dom.usualPlayerSearchInput.focus();
+    });
+
+    // Create New Player button if not in usual list
+    dom.btnCreateNewPlayer.addEventListener('click', () => {
+      const name = dom.usualPlayerSearchInput.value.trim();
+      if (!name) return;
+
+      // Add to tonight's table
+      if (!selectedTonightPlayers.includes(name)) {
+        selectedTonightPlayers.push(name);
+      }
+      // Add to usual roster
+      addUsualPlayer(name);
+
+      dom.usualPlayerSearchInput.value = '';
+      dom.btnClearSearch.style.display = 'none';
+      renderSelectedTonightPills();
+      playChipSound();
+      showToast(`Created "${name}" and added to tonight's game!`, 'success');
+    });
+
+    // Add all usual players to tonight
+    dom.btnAddAllUsual.addEventListener('click', () => {
+      usualPlayers.forEach(name => {
+        if (!selectedTonightPlayers.some(p => p.toLowerCase() === name.toLowerCase())) {
+          selectedTonightPlayers.push(name);
+        }
+      });
+      playChipSound();
+      renderSelectedTonightPills();
+    });
+
+    // Clear all tonight selected players
+    dom.btnClearSelectedPlayers.addEventListener('click', () => {
+      selectedTonightPlayers = [];
+      renderSelectedTonightPills();
+    });
+
+    // Selected players pill click delegation (remove chip)
+    dom.selectedPlayersList.addEventListener('click', (e) => {
+      const removeBtn = e.target.closest('.remove-chip-btn');
+      if (removeBtn && removeBtn.dataset.name) {
+        selectedTonightPlayers = selectedTonightPlayers.filter(p => p !== removeBtn.dataset.name);
+        renderSelectedTonightPills();
+      }
+    });
+
+    // Manage Usual Players Form
+    dom.addUsualPlayerForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (addUsualPlayer(dom.addUsualPlayerInput.value)) {
+        dom.addUsualPlayerInput.value = '';
+      }
+    });
+
+    // Usual Roster chip remove delegation
+    dom.rosterChipsList.addEventListener('click', (e) => {
+      const removeBtn = e.target.closest('.roster-chip-remove');
+      if (removeBtn && removeBtn.dataset.name) {
+        removeUsualPlayer(removeBtn.dataset.name);
+      }
+    });
+
+    // Sample group button
+    dom.btnLoadSampleRoster.addEventListener('click', () => {
+      DEFAULT_SAMPLE_PLAYERS.forEach(name => {
+        if (!usualPlayers.some(p => p.toLowerCase() === name.toLowerCase())) {
+          usualPlayers.push(name);
+        }
+      });
+      saveUsualPlayers();
+      renderUsualRoster();
+      renderUsualPickerGrid();
+      showToast('Loaded sample poker group!', 'success');
+    });
+
+    // Header New Game button
+    dom.btnHeaderNewGame.addEventListener('click', () => {
+      switchView('home');
+      dom.newGameTitleInput.focus();
+    });
+
+    // Game View Title input
     dom.gameTitleInput.addEventListener('change', () => {
       state.title = dom.gameTitleInput.value.trim() || 'Poker Night';
       saveState();
     });
 
-    // Add Player Form
+    // In-game Add Player Form
     dom.addPlayerForm.addEventListener('submit', (e) => {
       e.preventDefault();
-      addPlayer(dom.playerNameInput.value);
+      addPlayerToGame(dom.playerNameInput.value);
       dom.playerNameInput.value = '';
     });
 
-    // Recent Suggestion click delegation
+    // In-game quick suggestions delegation
     dom.suggestionsList.addEventListener('click', (e) => {
-      const chip = e.target.closest('.suggestion-chip');
+      const chip = e.target.closest('.in-game-quick-add');
       if (chip && chip.dataset.name) {
-        addPlayer(chip.dataset.name);
+        addPlayerToGame(chip.dataset.name);
       }
     });
 
-    // Players Grid Action Delegation
+    // In-game Player card actions delegation
     dom.playersGrid.addEventListener('click', (e) => {
       const rebuyBtn = e.target.closest('.btn-quick-rebuy');
       if (rebuyBtn) {
@@ -1083,11 +1462,10 @@
       }
     });
 
-    // Custom Buyin Presets & Submit
+    // Custom Buyin Presets
     document.querySelectorAll('.quick-amount-preset').forEach(btn => {
       btn.addEventListener('click', () => {
-        const amt = btn.dataset.amount;
-        dom.customBuyinAmount.value = amt;
+        dom.customBuyinAmount.value = btn.dataset.amount;
       });
     });
 
@@ -1131,22 +1509,12 @@
     dom.btnTransferHost.addEventListener('click', () => openShareModal('transfer'));
     dom.btnSettings.addEventListener('click', () => openModal(dom.modalSettings));
 
-    dom.btnNewGame.addEventListener('click', () => {
-      if (confirm('Start a new poker session? (Current session will be archived)')) {
-        createNewGame();
-        initSync();
-        render();
-        showToast('New game created!', 'success');
-      }
-    });
-
     dom.roomCodeBadge.addEventListener('click', () => {
       if (syncManager) {
         copyToClipboard(syncManager.getSpectatorUrl(), 'Spectator room link copied!');
       }
     });
 
-    // Edit default buyin from stat card
     dom.btnEditDefaultBuyin.addEventListener('click', () => {
       const newAmt = prompt('Enter new default buy-in amount:', state.defaultBuyin);
       if (newAmt && !isNaN(newAmt) && Number(newAmt) > 0) {
@@ -1167,18 +1535,15 @@
       dom.btnCalculateSettlement.style.display = '';
     });
 
-    // Copy Summary Text
     dom.btnCopySummary.addEventListener('click', () => {
       copyToClipboard(state.settlementSummary, '📋 Final summary copied! Paste it in WhatsApp.');
     });
 
-    // WhatsApp Share
     dom.btnShareWhatsApp.addEventListener('click', () => {
       const url = `https://wa.me/?text=${encodeURIComponent(state.settlementSummary)}`;
       window.open(url, '_blank');
     });
 
-    // Share Modal tabs & copies
     dom.tabSpectator.addEventListener('click', () => switchShareTab('spectator'));
     dom.tabTransfer.addEventListener('click', () => switchShareTab('transfer'));
     dom.btnCopySpectatorLink.addEventListener('click', () => {
@@ -1188,7 +1553,6 @@
       copyToClipboard(dom.hostTransferLinkInput.value, '👑 Host transfer link copied! Send to new host.');
     });
 
-    // Spectator Banner Claim Host button
     dom.btnClaimHostPrompt.addEventListener('click', () => {
       const enteredSecret = prompt('Enter Host secret key to take over as host:');
       if (enteredSecret && syncManager) {
@@ -1206,7 +1570,6 @@
       }
     });
 
-    // Settings save
     dom.btnSaveSettings.addEventListener('click', () => {
       state.currency = dom.settingCurrencyInput.value.trim() || '₹';
       state.defaultBuyin = Number(dom.settingDefaultBuyinInput.value) || 200;
@@ -1226,7 +1589,6 @@
       showToast('Settings saved!', 'success');
     });
 
-    // Close Modals on backdrop or close button
     document.querySelectorAll('.modal-close, [data-modal]').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const modalId = btn.dataset.modal;
@@ -1245,7 +1607,6 @@
       });
     });
 
-    // Escape key closes modals
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         document.querySelectorAll('.modal-overlay.active').forEach(m => closeModal(m));
@@ -1253,7 +1614,6 @@
     });
   }
 
-  // Launch on DOM ready
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
