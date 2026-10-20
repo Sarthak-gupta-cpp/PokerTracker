@@ -228,7 +228,7 @@
         <!-- Add to Roster Form -->
         <form id="addUsualPlayerForm" class="add-usual-form" autocomplete="off">
           <input type="text" id="addUsualPlayerInput" class="input-text" placeholder="Add regular player name (e.g. Sam, Vidit)..." maxlength="30" required>
-          <button type="submit" class="btn btn-secondary">
+          <button type="submit" id="btnAddUsualPlayer" class="btn btn-secondary">
             <span>+ Add to Roster</span>
           </button>
         </form>
@@ -382,7 +382,7 @@
     </main>
 
     <!-- Sticky Bottom Bar in Game View -->
-    <aside class="bottom-bar">
+    <aside id="gameBottomBar" class="bottom-bar game-only-control" style="display: none;">
       <div class="container bottom-bar-inner">
         <div class="bottom-pot-info">
           <span class="bottom-pot-label">Total Pot</span>

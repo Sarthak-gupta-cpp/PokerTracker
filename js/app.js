@@ -174,9 +174,13 @@
     // Usual Players Roster
     addUsualPlayerForm: document.getElementById('addUsualPlayerForm'),
     addUsualPlayerInput: document.getElementById('addUsualPlayerInput'),
+    btnAddUsualPlayer: document.getElementById('btnAddUsualPlayer'),
     rosterChipsList: document.getElementById('rosterChipsList'),
     emptyRosterMsg: document.getElementById('emptyRosterMsg'),
     btnLoadSampleRoster: document.getElementById('btnLoadSampleRoster'),
+
+    // Sticky Bottom Bar
+    gameBottomBar: document.getElementById('gameBottomBar'),
 
     // Game View Hero & Stats
     gameTitleInput: document.getElementById('gameTitleInput'),
@@ -470,24 +474,18 @@
     dom.gamesListContainer.innerHTML = '';
 
     if (games.length === 0) {
-      if (dom.noGamesMsg) dom.noGamesMsg.style.display = 'block';
+      if (dom.gamesSection) dom.gamesSection.style.display = 'none';
+      if (dom.noGamesMsg) dom.noGamesMsg.style.display = 'none';
       return;
     }
 
+    if (dom.gamesSection) dom.gamesSection.style.display = 'block';
     if (dom.noGamesMsg) dom.noGamesMsg.style.display = 'none';
 
     games.forEach(g => {
       const card = document.createElement('div');
       card.className = `game-session-card ${g.status === 'ended' ? 'is-settled' : 'is-active'}`;
 
-      let pot = 0;
-      if (Array.isArray(g.players)) {
-        g.players.forEach(p => {
-          pot += (p.buyIns || []).reduce((s, b) => s + (Number(b) || 0), 0);
-        });
-      }
-
-      const isCurrentActive = state.roomId === g.roomId && currentView === 'game';
       const statusBadgeHtml = g.status === 'ended'
         ? `<span class="game-status-badge settled">🏁 Settled</span>`
         : `<span class="game-status-badge active"><span class="status-dot"></span> Live</span>`;
@@ -499,15 +497,10 @@
             ${statusBadgeHtml}
             <span class="game-session-room">#${g.roomId}</span>
           </div>
-          <div class="game-session-meta">
-            <span>📅 ${escapeHtml(g.date || 'Recent')}</span>
-            <span>👥 ${(g.players || []).length} players</span>
-            <span>💰 Pot: ${escapeHtml(g.currency || '₹')}${pot.toLocaleString()}</span>
-          </div>
         </div>
         <div class="game-session-actions">
           <button type="button" class="btn btn-primary btn-sm btn-open-session">
-            ${isCurrentActive ? '▶ Resume' : 'Open ➔'}
+            ▶ Resume Game
           </button>
           <button type="button" class="btn btn-danger-ghost btn-sm btn-delete-session" title="Delete this game">
             🗑️
@@ -590,8 +583,9 @@
       dom.viewHome.style.display = 'block';
       dom.viewGame.style.display = 'none';
 
-      // Hide game-specific controls in header
+      // Hide game-specific controls in header & sticky bottom bar
       document.querySelectorAll('.game-only-control').forEach(el => el.style.display = 'none');
+      if (dom.gameBottomBar) dom.gameBottomBar.style.display = 'none';
       dom.roomCodeBadge.style.display = 'none';
 
       // Refresh games list on Home
@@ -617,6 +611,7 @@
           el.style.display = '';
         }
       });
+      if (dom.gameBottomBar) dom.gameBottomBar.style.display = '';
       dom.roomCodeBadge.style.display = '';
 
       if (window.location.hash !== '#game' && !window.location.search) {
@@ -1619,12 +1614,26 @@
     });
 
     // Manage Usual Players Form
-    dom.addUsualPlayerForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      if (addUsualPlayer(dom.addUsualPlayerInput.value)) {
-        dom.addUsualPlayerInput.value = '';
+    function handleAddUsualPlayerSubmit(e) {
+      if (e) e.preventDefault();
+      const val = (dom.addUsualPlayerInput.value || '').trim();
+      if (!val) {
+        showToast('Please enter a player name first', 'warning');
+        dom.addUsualPlayerInput.focus();
+        return;
       }
-    });
+      if (addUsualPlayer(val)) {
+        dom.addUsualPlayerInput.value = '';
+        dom.addUsualPlayerInput.focus();
+      }
+    }
+
+    if (dom.addUsualPlayerForm) {
+      dom.addUsualPlayerForm.addEventListener('submit', handleAddUsualPlayerSubmit);
+    }
+    if (dom.btnAddUsualPlayer) {
+      dom.btnAddUsualPlayer.addEventListener('click', handleAddUsualPlayerSubmit);
+    }
 
     // Usual Roster chip remove delegation
     dom.rosterChipsList.addEventListener('click', (e) => {
