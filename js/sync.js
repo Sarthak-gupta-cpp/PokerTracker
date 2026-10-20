@@ -102,6 +102,7 @@
 
         this.peer.on('open', (id) => {
           this.isConnected = true;
+          this.hostRetryCount = 0;
           this.onConnectionChange({
             status: 'online',
             role: 'host',
@@ -117,7 +118,26 @@
         this.peer.on('error', (err) => {
           console.error('Host Peer error:', err);
           if (err.type === 'unavailable-id') {
-            // Another tab or host might be running with this ID
+            if (this.hostRetryCount === undefined) this.hostRetryCount = 0;
+            if (this.hostRetryCount < 6) {
+              this.hostRetryCount++;
+              this.onConnectionChange({
+                status: 'connecting',
+                role: 'host',
+                message: `Claiming host slot (attempt ${this.hostRetryCount}/6)...`
+              });
+              setTimeout(() => {
+                if (this.isHost) {
+                  this.cleanup();
+                  if (this.peer && !this.peer.destroyed) {
+                    try { this.peer.destroy(); } catch (e) {}
+                    this.peer = null;
+                  }
+                  this._startHost();
+                }
+              }, 1200);
+              return;
+            }
             this.onConnectionChange({
               status: 'warning',
               role: 'host',
@@ -177,8 +197,13 @@
         } else if (data.type === 'CLAIM_HOST') {
           // Check secret for host transfer
           if (data.secret && data.secret === this.hostSecret) {
-            conn.send({ type: 'HOST_TRANSFER_CONFIRMED', success: true });
-            this.stepDownAsHost(data.newHostName);
+            try {
+              conn.send({ type: 'HOST_TRANSFER_CONFIRMED', success: true });
+            } catch (e) {}
+            // Wait for confirmation packet to flush out of network buffer before destroying host peer
+            setTimeout(() => {
+              this.stepDownAsHost(data.newHostName || 'New Host');
+            }, 400);
           } else {
             conn.send({ type: 'HOST_TRANSFER_DENIED', error: 'Invalid secret key' });
           }
@@ -222,6 +247,15 @@
 
         this.peer.on('error', (err) => {
           console.error('Viewer peer error:', err);
+          if (err.type === 'peer-unavailable' && this.pendingClaimSecret) {
+            // The previous host is offline/already stepped down, but this peer holds the valid secret key.
+            // Promote directly to host so the game does not become hostless.
+            const sec = this.pendingClaimSecret;
+            this.pendingClaimSecret = null;
+            this.pendingHostSecret = sec;
+            this._handlePromotedToHost();
+            return;
+          }
           this.onConnectionChange({
             status: 'warning',
             role: 'viewer',

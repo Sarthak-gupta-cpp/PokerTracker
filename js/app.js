@@ -301,7 +301,6 @@
         state.pendingClaimSecret = claimParam;
         state.isHost = false;
         state.hostSecret = null;
-        window.history.replaceState({}, '', `${window.location.pathname}?room=${state.roomId}`);
       } else if (storedSecret) {
         state.hostSecret = storedSecret;
         state.isHost = true;
