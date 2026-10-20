@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="chipGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10B981" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+    <linearGradient id="innerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1E293B" />
+      <stop offset="100%" stop-color="#0F172A" />
+    </linearGradient>
+  </defs>
+  <circle cx="32" cy="32" r="30" fill="url(#chipGrad)" stroke="#34D399" stroke-width="2"/>
+  <circle cx="32" cy="32" r="28" fill="none" stroke="#FFFFFF" stroke-dasharray="6 4" stroke-width="2" opacity="0.6"/>
+  <circle cx="32" cy="32" r="20" fill="url(#innerGrad)" stroke="#34D399" stroke-width="1.5"/>
+  <!-- Spade Icon in Center -->
+  <path d="M32 18 C30 24 23 27 23 32 C23 36 26 38 29 38 C31 38 32 37 32 37 C32 37 33 38 35 38 C38 38 41 36 41 32 C41 27 34 24 32 18 Z" fill="#F8FAFC"/>
+  <path d="M30 36 L29 44 L35 44 L34 36 Z" fill="#F8FAFC"/>
+</svg>
